@@ -1,0 +1,26 @@
+AUDIO RECORDER PRO - DOWNLOADS AND RELEASES
+
+Releases, always the newest first:
+
+    https://github.com/ce2004/arp-native/releases
+
+Latest release directly:
+
+    https://github.com/ce2004/arp-native/releases/latest
+
+Direct downloads of the newest build:
+
+    https://github.com/ce2004/arp-native/releases/latest/download/ArpRecorder-win-arm64.exe
+    https://github.com/ce2004/arp-native/releases/latest/download/ArpRecorder-win-x64.exe
+
+Checksums for verifying a download:
+
+    https://github.com/ce2004/arp-native/releases/latest/download/sha256sums.txt
+
+Source:
+
+    https://github.com/ce2004/arp-native
+
+Pick win-arm64 on an ARM64 machine, win-x64 on an Intel or AMD one. Each is a
+single executable with nothing beside it. The program also updates itself from
+this same feed through Settings, Check for Updates Now.
