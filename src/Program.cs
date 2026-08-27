@@ -14,10 +14,23 @@ namespace Arp
         [STAThread]
         private static int Main(string[] args)
         {
+            // Relaunched by an update: delete the executable the previous
+            // version left behind. This runs before anything else so the
+            // cleanup happens even when the relaunch also carries a switch.
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] != "--finish-update") continue;
+                AttachConsole(unchecked((uint)-1));
+                int.TryParse(args[i + 1], out int pid);
+                Updater.FinishUpdate(pid);
+                break;
+            }
+
             foreach (string a in args)
             {
                 if (a != "--selftest" && a != "--uitest" && a != "--captest" && a != "--signaltest" &&
-                    a != "--speech" && a != "--config" && a != "--devices" && a != "--version") continue;
+                    a != "--speech" && a != "--config" && a != "--checkupdate" && a != "--update" &&
+                    a != "--devices" && a != "--version") continue;
 
                 // A WinExe has no console of its own; borrow the caller's so the
                 // diagnostic switches are usable from a terminal.
@@ -37,19 +50,11 @@ namespace Arp
                 if (a == "--signaltest") return SignalTest.Run(args);
                 if (a == "--speech") return SpeechCheck(Array.IndexOf(args, "say") >= 0);
                 if (a == "--config") return DumpConfig();
+                if (a == "--checkupdate") return Updater.CheckHeadless();
+                if (a == "--update") return Updater.UpdateHeadless();
                 if (a == "--devices") return ListDevices();
                 Console.WriteLine(Updater.CurrentVersion + " (" + Updater.ArchSuffix + ")");
                 return 0;
-            }
-
-            // Relaunched by an update: remove the executable the previous
-            // version left behind before doing anything else.
-            for (int i = 0; i < args.Length - 1; i++)
-            {
-                if (args[i] != "--finish-update") continue;
-                int.TryParse(args[i + 1], out int pid);
-                Updater.FinishUpdate(pid);
-                break;
             }
 
             try

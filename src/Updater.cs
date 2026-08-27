@@ -1,9 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -33,7 +32,7 @@ namespace Arp
     /// </summary>
     internal static class Updater
     {
-        public const string CurrentVersion = "v2.0.0";
+        public const string CurrentVersion = "v2.0.1";
         private const string Repo = "ce2004/arp-native";
 
         /// <summary>Suffix given to the outgoing executable while it is still running.</summary>
@@ -89,25 +88,13 @@ namespace Arp
 
         // ---- feed ----
 
-        private static HttpClient NewClient()
-        {
-            var c = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-            // GitHub rejects requests without a User-Agent.
-            c.DefaultRequestHeaders.Add("User-Agent", "AudioRecorderPro/" + CurrentVersion);
-            c.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
-            return c;
-        }
-
         /// <summary>
         /// Returns the newest release if it is newer than this build, or null.
         /// Picks the asset whose name carries this process's architecture.
         /// </summary>
         internal static UpdateInfo Check()
         {
-            using var http = NewClient();
-            string json = http.GetStringAsync("https://api.github.com/repos/" + Repo + "/releases/latest")
-                              .GetAwaiter().GetResult();
-
+            string json = Http.GetString("https://api.github.com/repos/" + Repo + "/releases/latest");
             var release = JsonObject.Parse(json);
             string tag = release.GetString("tag_name", "");
             if (string.IsNullOrEmpty(tag)) return null;
@@ -151,8 +138,7 @@ namespace Arp
             {
                 try
                 {
-                    string sums = http.GetStringAsync(shaUrl).GetAwaiter().GetResult();
-                    sha = FindHashFor(sums, wanted);
+                    sha = FindHashFor(Http.GetString(shaUrl), wanted);
                 }
                 catch (Exception e)
                 {
@@ -251,6 +237,79 @@ namespace Arp
             }
         }
 
+        /// <summary>
+        /// Reports to a dialog when there is a window, and to the console and
+        /// log when running headless, so the same code path serves both the UI
+        /// and the --update switch.
+        /// </summary>
+        private static void Report(IntPtr owner, string text, string caption, uint icon)
+        {
+            if (owner != IntPtr.Zero)
+            {
+                Win32.MessageBoxW(owner, text, caption, Win32.MB_OK | icon);
+                return;
+            }
+            Console.WriteLine(caption + ": " + text.Replace("\r\n", " "));
+            Log.Info(caption + ": " + text.Replace("\r\n", " "));
+        }
+
+        /// <summary>Headless check used by the --checkupdate switch.</summary>
+        public static int CheckHeadless()
+        {
+            Console.WriteLine("Installed  : " + CurrentVersion + " (" + ArchSuffix + ")");
+            Console.WriteLine("Feed       : https://github.com/" + Repo + "/releases/latest");
+            try
+            {
+                var info = Check();
+                if (info == null)
+                {
+                    Console.WriteLine("Result     : up to date");
+                    return 0;
+                }
+                Console.WriteLine("Result     : " + info.Version + " available");
+                Console.WriteLine("Download   : " + info.DownloadUrl);
+                Console.WriteLine("Size       : " + info.Size.ToString("N0", CultureInfo.InvariantCulture) + " bytes");
+                Console.WriteLine("SHA-256    : " + (info.Sha256 ?? "NOT PUBLISHED - would refuse to install"));
+                if (!string.IsNullOrEmpty(info.ReleaseNotes))
+                {
+                    Console.WriteLine("Notes      :");
+                    foreach (string line in info.ReleaseNotes.Split('\n'))
+                        Console.WriteLine("             " + line);
+                }
+                return 10;
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine("Update check failed: " + e.Message);
+                return 1;
+            }
+        }
+
+        /// <summary>Headless check-and-install used by the --update switch.</summary>
+        public static int UpdateHeadless()
+        {
+            try
+            {
+                var info = Check();
+                if (info == null)
+                {
+                    Console.WriteLine("Already up to date (" + CurrentVersion + ").");
+                    return 0;
+                }
+                Console.WriteLine("Installing " + info.Version + " over " + CurrentVersion + "...");
+                // Relaunch headless too: clean up, report the new version, exit.
+                // A GUI appearing out of an unattended update would be wrong.
+                Apply(IntPtr.Zero, info, "--version");
+                // Apply exits the process on success, so reaching here failed.
+                return 1;
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine("Update failed: " + e.Message);
+                return 1;
+            }
+        }
+
         private static void Offer(IntPtr owner, UpdateInfo info)
         {
             var dlg = new UpdateDialog(CurrentVersion, info.Version, info.ReleaseNotes);
@@ -260,7 +319,7 @@ namespace Arp
 
         // ---- install ----
 
-        private static void Apply(IntPtr owner, UpdateInfo info)
+        private static void Apply(IntPtr owner, UpdateInfo info, string relaunchExtraArgs = "")
         {
             string exe = ExePath;
             string dir = Path.GetDirectoryName(exe);
@@ -272,9 +331,7 @@ namespace Arp
                 Speech.SpeakRaw("Downloading update. Please wait.");
                 Log.Info("Downloading " + info.DownloadUrl);
 
-                byte[] payload;
-                using (var http = NewClient())
-                    payload = http.GetByteArrayAsync(info.DownloadUrl).GetAwaiter().GetResult();
+                byte[] payload = Http.Get(info.DownloadUrl, 120);
 
                 if (payload.Length < 1024)
                     throw new Exception("The downloaded file is too small to be the application.");
@@ -288,10 +345,10 @@ namespace Arp
                     {
                         Log.Error("Checksum mismatch: expected " + info.Sha256 + ", got " + actual);
                         Speech.SpeakRaw("Update failed. The download did not match its checksum.");
-                        Win32.MessageBoxW(owner,
+                        Report(owner,
                             "The downloaded update did not match its published checksum, so it was not " +
                             "installed. Your current version is untouched.",
-                            "Update Failed", Win32.MB_OK | Win32.MB_ICONERROR);
+                            "Update Failed", Win32.MB_ICONERROR);
                         return;
                     }
                     Log.Info("Checksum verified.");
@@ -300,10 +357,10 @@ namespace Arp
                 {
                     Log.Error("No checksum published for this release; refusing to install.");
                     Speech.SpeakRaw("Update aborted. No checksum was published.");
-                    Win32.MessageBoxW(owner,
+                    Report(owner,
                         "This release did not publish a checksum, so the download could not be verified " +
                         "and was not installed.",
-                        "Update Failed", Win32.MB_OK | Win32.MB_ICONERROR);
+                        "Update Failed", Win32.MB_ICONERROR);
                     return;
                 }
 
@@ -333,7 +390,7 @@ namespace Arp
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = exe,
-                    Arguments = "--finish-update " + Environment.ProcessId,
+                    Arguments = ("--finish-update " + Environment.ProcessId + " " + relaunchExtraArgs).Trim(),
                     UseShellExecute = false,
                     WorkingDirectory = dir,
                 });
@@ -345,9 +402,9 @@ namespace Arp
                 Log.Error("Update failed: " + e.Message, e);
                 TryDelete(staged);
                 Speech.SpeakRaw("Update failed.");
-                Win32.MessageBoxW(owner,
+                Report(owner,
                     "The update could not be installed. Your current version is untouched.\r\n\r\n" + e.Message,
-                    "Update Failed", Win32.MB_OK | Win32.MB_ICONERROR);
+                    "Update Failed", Win32.MB_ICONERROR);
             }
         }
 
