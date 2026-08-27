@@ -66,9 +66,16 @@ jobs:
           $exe = Get-Item "publish\${{ matrix.rid }}\ArpRecorder.exe"
           "${{ matrix.rid }}: {0:N2} MB" -f ($exe.Length / 1MB)
 
+      # Debug symbols are ~12 MB against a ~2.5 MB executable and are not
+      # needed to run it, so they stay out of the download. Stack traces are
+      # still enabled in the build; they just lose line numbers.
       - name: Create archive
         run: |
-          Compress-Archive -Path "publish\${{ matrix.rid }}\*" `
+          $files = Get-ChildItem "publish\${{ matrix.rid }}" -Recurse -File |
+                   Where-Object { $_.Extension -ne ".pdb" }
+          Write-Host "Packaging:"
+          $files | ForEach-Object { "  {0,10:N0}  {1}" -f $_.Length, $_.Name } | Write-Host
+          Compress-Archive -Path $files.FullName `
                            -DestinationPath "Audio Recorder Pro-${{ matrix.rid }}.zip"
 
       - name: Generate SHA256 checksum

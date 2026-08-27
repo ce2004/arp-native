@@ -47,6 +47,12 @@
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest"
           Link="%(Filename)%(Extension)" />
+    <!-- The controller client is LGPL, so its licence ships with it. -->
+    <None Include="native\NVDA-controllerClient-LICENSE.txt"
+          Condition="'$(RuntimeIdentifier)' != ''"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Link="%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

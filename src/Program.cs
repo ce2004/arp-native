@@ -15,7 +15,7 @@ namespace Arp
             foreach (string a in args)
             {
                 if (a != "--selftest" && a != "--uitest" && a != "--captest" && a != "--signaltest" &&
-                    a != "--devices" && a != "--version") continue;
+                    a != "--speech" && a != "--devices" && a != "--version") continue;
 
                 // A WinExe has no console of its own; borrow the caller's so the
                 // diagnostic switches are usable from a terminal.
@@ -33,6 +33,7 @@ namespace Arp
                 if (a == "--uitest") return UiTest.Run();
                 if (a == "--captest") return CaptureTest.Run(args);
                 if (a == "--signaltest") return SignalTest.Run(args);
+                if (a == "--speech") return SpeechCheck(Array.IndexOf(args, "say") >= 0);
                 if (a == "--devices") return ListDevices();
                 Console.WriteLine(Updater.CurrentVersion + " (" + Updater.ArchSuffix + ")");
                 return 0;
@@ -85,6 +86,36 @@ namespace Arp
 
             Log.Info("App exiting normally.");
             return 0;
+        }
+
+        /// <summary>
+        /// Reports which speech backend loaded and whether NVDA is reachable.
+        /// Add the word "say" to also send a test phrase to NVDA.
+        /// </summary>
+        private static int SpeechCheck(bool speak)
+        {
+            Speech.Init();
+            Console.WriteLine("Process architecture : " + RuntimeInformation.ProcessArchitecture);
+            Console.WriteLine("Controller client    : " + (Speech.HasNvda ? "loaded" : "NOT FOUND"));
+            Console.WriteLine("NVDA running         : " + (Speech.NvdaRunning() ? "yes" : "no"));
+            Console.WriteLine("Backend              : " + Speech.Describe());
+
+            if (!Speech.HasNvda)
+            {
+                Console.WriteLine();
+                Console.WriteLine("Place nvdaControllerClient" +
+                    (RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "Arm64" : "64") +
+                    ".dll next to this executable.");
+                return 1;
+            }
+
+            if (speak)
+            {
+                Console.WriteLine();
+                Console.WriteLine("Sending a test phrase to NVDA...");
+                Speech.SpeakRaw("Audio Recorder Pro speech test. If you can hear this, announcements are working.");
+            }
+            return Speech.NvdaRunning() ? 0 : 2;
         }
 
         /// <summary>Prints the device list the settings dialog would show. Diagnostic only.</summary>

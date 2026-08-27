@@ -222,6 +222,13 @@ dependency and the tests run against the shipping code.
 
       Prints the endpoint list the settings dialog would show, with ids.
 
+    ArpRecorder.exe --speech [say]
+
+      Reports which speech backend loaded, whether the architecture-matched
+      controller client was found, and whether NVDA is running. Exit code 0
+      means speech is working, 1 means no client was found, 2 means the client
+      loaded but NVDA is not running.
+
 Each mode writes its transcript to %TEMP%\arp_<mode>_report.txt and exits
 non-zero on failure.
 
@@ -235,16 +242,23 @@ silence. If the controller client is missing, announcements are written to the
 log and dropped, and NVDA still reads the whole interface normally because
 every control is a real Win32 control.
 
-The controller client must match the architecture of THIS process, not NVDA's.
-Place the matching DLL in native\<rid>\ and the build copies it next to the
-executable:
+The controller client must match the architecture of THIS process, not NVDA's,
+which is a real trap here: NVDA itself is an x64 build running under emulation
+on ARM64, but a native ARM64 recorder still needs the ARM64 client. Both are
+present and are copied next to the executable by the build:
 
-  native\win-x64\nvdaControllerClient64.dll      (present)
-  native\win-arm64\nvdaControllerClientArm64.dll (needed for ARM64 speech)
+  native\win-x64\nvdaControllerClient64.dll      (x64 build)
+  native\win-arm64\nvdaControllerClientArm64.dll (ARM64 build)
 
-The ARM64 client ships in NVDA's controllerClient package. Until it is dropped
-in, the ARM64 build runs fine but makes no spoken status announcements of its
-own.
+Both came from NVDA 2026.1's official controllerClient package and are LGPL;
+native\NVDA-controllerClient-LICENSE.txt ships alongside them. To update them,
+download nvda_<version>_controllerClient.zip from nvaccess.org and copy the
+arm64 and x64 DLLs into those folders under the names above.
+
+To check speech is working:
+
+    ArpRecorder.exe --speech        reports the backend and whether NVDA is up
+    ArpRecorder.exe --speech say    also sends a test phrase to NVDA
 
 READ-ONLY TEXT
 
