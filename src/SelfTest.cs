@@ -51,6 +51,7 @@ namespace Arp
                 TestRf64(tmp);
                 TestRepair(tmp);
                 TestSounds();
+                TestUpdater(tmp);
                 TestTemplates();
             }
             catch (Exception e)
@@ -583,6 +584,67 @@ namespace Arp
             Check(mismatches == 0,
                 name + " is sample-identical to gen_sounds.py output (" + mismatches +
                 " mismatches, first at index " + firstBad + ")");
+        }
+
+        private static void TestUpdater(string dir)
+        {
+            Section("Updater");
+
+            // Numeric comparison, so v1.10.0 beats v1.9.0 where a string
+            // compare would get it backwards.
+            Check(Updater.CompareVersions("v1.10.0", "v1.9.0") > 0, "v1.10.0 is newer than v1.9.0");
+            Check(Updater.CompareVersions("v2.0.0", "v2.0.0") == 0, "identical versions compare equal");
+            Check(Updater.CompareVersions("v2.0.1", "v2.0.0") > 0, "patch bump is newer");
+            Check(Updater.CompareVersions("v1.9.9", "v2.0.0") < 0, "major bump is newer");
+            Check(Updater.CompareVersions("2.1", "v2.0.5") > 0, "a missing v and short form still compare");
+            Check(Updater.CompareVersions("v2.0", "v2.0.0") == 0, "absent components count as zero");
+            Check(Updater.CompareVersions("garbage", "v0.0.1") < 0, "unparseable is treated as oldest");
+
+            Eq(string.Join(".", Updater.ParseVersion("v3.4.5")), "3.4.5", "tag parses to components");
+
+            // The checksum line has to be matched by architecture, or a build
+            // could be verified against the wrong hash.
+            const string sums =
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  ArpRecorder-win-arm64.exe\n" +
+                "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB  ArpRecorder-win-x64.exe";
+            Eq(Updater.FindHashFor(sums, "win-arm64"), new string('A', 64), "arm64 hash selected");
+            Eq(Updater.FindHashFor(sums, "win-x64"), new string('B', 64), "x64 hash selected");
+            Check(Updater.FindHashFor(sums, "win-x86") == null, "a missing architecture yields no hash");
+            Check(Updater.FindHashFor("", "win-x64") == null, "an empty checksum file yields no hash");
+            Check(Updater.FindHashFor("not a checksum line", "win-x64") == null, "junk yields no hash");
+
+            // Release notes are read aloud, so markdown symbols must go.
+            string notes = Updater.CleanNotes("## Heading\n- Fixed **a thing**\n\n* Added `stuff`\n");
+            Check(!notes.Contains('#') && !notes.Contains('*') && !notes.Contains('`'),
+                "markdown symbols stripped from release notes");
+            Check(notes.Contains("Fixed a thing"), "release note text survives cleaning");
+            Check(!notes.Contains("\n\n"), "blank lines removed from release notes");
+
+            // Leftovers from an interrupted update must be swept away, and
+            // nothing else in the folder may be touched.
+            string sweep = Path.Combine(dir, "sweep");
+            Directory.CreateDirectory(sweep);
+            File.WriteAllText(Path.Combine(sweep, "ArpRecorder.exe"), "current");
+            File.WriteAllText(Path.Combine(sweep, "ArpRecorder.exe.old-update"), "previous");
+            File.WriteAllText(Path.Combine(sweep, "ArpRecorder.exe.new"), "staged");
+            File.WriteAllText(Path.Combine(sweep, "recording.wav"), "keep me");
+
+            int remaining = Updater.CleanupLeftovers(sweep);
+            Eq(remaining, 0, "sweep reports nothing left behind");
+            Check(!File.Exists(Path.Combine(sweep, "ArpRecorder.exe.old-update")), "old executable deleted");
+            Check(!File.Exists(Path.Combine(sweep, "ArpRecorder.exe.new")), "staged download deleted");
+            Check(File.Exists(Path.Combine(sweep, "ArpRecorder.exe")), "the live executable is kept");
+            Check(File.Exists(Path.Combine(sweep, "recording.wav")), "unrelated files are untouched");
+
+            Eq(Directory.GetFiles(sweep).Length, 2, "only the executable and the recording remain");
+            Eq(Updater.CleanupLeftovers(sweep), 0, "sweeping a clean folder is harmless");
+
+            // The asset name the updater looks for must match what CI publishes.
+            Check(Updater.ArchSuffix is "win-arm64" or "win-x64" or "win-x86",
+                "architecture suffix is a known value (" + Updater.ArchSuffix + ")");
+            Check(("ArpRecorder-" + Updater.ArchSuffix + ".exe")
+                    .Contains(Updater.ArchSuffix, StringComparison.OrdinalIgnoreCase),
+                "published asset name carries the architecture the updater matches on");
         }
 
         private static void TestTemplates()

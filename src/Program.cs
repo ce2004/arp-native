@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 
@@ -15,7 +17,7 @@ namespace Arp
             foreach (string a in args)
             {
                 if (a != "--selftest" && a != "--uitest" && a != "--captest" && a != "--signaltest" &&
-                    a != "--speech" && a != "--devices" && a != "--version") continue;
+                    a != "--speech" && a != "--config" && a != "--devices" && a != "--version") continue;
 
                 // A WinExe has no console of its own; borrow the caller's so the
                 // diagnostic switches are usable from a terminal.
@@ -34,9 +36,20 @@ namespace Arp
                 if (a == "--captest") return CaptureTest.Run(args);
                 if (a == "--signaltest") return SignalTest.Run(args);
                 if (a == "--speech") return SpeechCheck(Array.IndexOf(args, "say") >= 0);
+                if (a == "--config") return DumpConfig();
                 if (a == "--devices") return ListDevices();
                 Console.WriteLine(Updater.CurrentVersion + " (" + Updater.ArchSuffix + ")");
                 return 0;
+            }
+
+            // Relaunched by an update: remove the executable the previous
+            // version left behind before doing anything else.
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] != "--finish-update") continue;
+                int.TryParse(args[i + 1], out int pid);
+                Updater.FinishUpdate(pid);
+                break;
             }
 
             try
@@ -61,6 +74,10 @@ namespace Arp
                      " / " + RuntimeInformation.OSArchitecture +
                      ", process " + RuntimeInformation.ProcessArchitecture +
                      ", version " + Updater.CurrentVersion);
+
+            // Safety net: an update interrupted by a crash or a power cut must
+            // not leave a stray executable in the folder.
+            Updater.CleanupOnStartup();
 
             Win32.EnableDpiAwareness();
             Win32.InitCommonControls();
@@ -116,6 +133,106 @@ namespace Arp
                 Speech.SpeakRaw("Audio Recorder Pro speech test. If you can hear this, announcements are working.");
             }
             return Speech.NvdaRunning() ? 0 : 2;
+        }
+
+        /// <summary>
+        /// Reads the shared configuration file and prints what this build makes
+        /// of it, without writing anything. Confirms that the file the Python
+        /// version wrote is understood here, including which device it resolves
+        /// to. Read-only on purpose.
+        /// </summary>
+        private static int DumpConfig()
+        {
+            string path = Path.Combine(Config.AppDataDir, "recorder_config.json");
+            Console.WriteLine("Config file : " + path);
+            Console.WriteLine("Exists      : " + File.Exists(path));
+            if (!File.Exists(path))
+            {
+                Console.WriteLine();
+                Console.WriteLine("No configuration file yet; defaults would be used.");
+                return 1;
+            }
+
+            var cfg = new Config(path);
+            Console.WriteLine();
+            Console.WriteLine("As read by this build:");
+            void W(string k, object v) => Console.WriteLine("  {0,-26} {1}", k, v);
+
+            W("save_folder", cfg.SaveFolder);
+            W("sample_rate", cfg.SampleRate);
+            W("bit_depth", cfg.BitDepth);
+            W("channels", cfg.Channels);
+            W("buffer_size", cfg.BufferSize);
+            W("filename_prefix", "\"" + cfg.FilenamePrefix + "\"");
+            W("auto_start", cfg.AutoStart);
+            W("auto_start_delay", cfg.AutoStartDelay + " s");
+            W("auto_split_secs", cfg.AutoSplitSecs + " s");
+            W("max_length_secs", cfg.MaxLengthSecs + " s");
+            W("group_splits", cfg.GroupSplits);
+            W("in1_route", cfg.In1Route);
+            W("in2_route", cfg.In2Route);
+            W("in1_gain / in2_gain", cfg.In1Gain + " / " + cfg.In2Gain);
+            W("window_title", cfg.WindowTitle);
+            W("confirm_exit", cfg.ConfirmExit);
+            W("speak_in_focus_only", cfg.SpeakInFocusOnly);
+            W("auto_resume_unattended", cfg.AutoResumeUnattended);
+            W("continue_on_mic_disconnect", cfg.ContinueOnMicDisconnect);
+            W("check_updates_startup", cfg.CheckUpdatesStartup);
+            W("snd_volume", cfg.SndVolume);
+            foreach (string ev in Config.SoundEvents)
+                W("sound for " + ev, cfg.SoundFor(ev) + (cfg.SndEnabled(ev) ? "" : "  (disabled)"));
+            W("device_id", cfg.DeviceId);
+            W("device2_id", cfg.Device2Id);
+
+            Console.WriteLine();
+            Console.WriteLine("Device resolution:");
+            try
+            {
+                Wasapi.CoInitializeEx(IntPtr.Zero, Wasapi.COINIT_APARTMENTTHREADED);
+                var devices = Wasapi.EnumerateDevices();
+                var d1 = devices.Find(d => d.Id == cfg.DeviceId);
+                Console.WriteLine("  Input 1  " + (d1 != null ? "FOUND   " + d1.DisplayName : "NOT CONNECTED"));
+                if (cfg.Device2Id == "none")
+                {
+                    Console.WriteLine("  Input 2  not configured");
+                }
+                else
+                {
+                    var d2 = devices.Find(d => d.Id == cfg.Device2Id);
+                    Console.WriteLine("  Input 2  " + (d2 != null ? "FOUND   " + d2.DisplayName : "NOT CONNECTED"));
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("  device enumeration failed: " + e.Message);
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("Keys present in the file that this build does not use:");
+            var known = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "auto_start","auto_start_delay","save_folder","sample_rate","bit_depth","channels",
+                "filename_prefix","auto_split_secs","max_length_secs","group_splits","buffer_size",
+                "device_id","device2_id","in1_route","in2_route","in1_gain","in2_gain","window_title",
+                "notify_start_stop","notify_split","notify_error","notify_drive_disconnect",
+                "notify_mic_disconnect","speak_in_focus_only","auto_resume_unattended",
+                "continue_on_mic_disconnect","confirm_exit","check_updates_startup",
+                "snd_start","snd_stop","snd_pause","snd_unpause","snd_volume","device_sort_order",
+                "snd_start_sound","snd_stop_sound","snd_pause_sound","snd_unpause_sound",
+            };
+            var raw = JsonObject.Parse(File.ReadAllText(path));
+            bool any = false;
+            foreach (string k in raw.Keys)
+            {
+                if (known.Contains(k)) continue;
+                Console.WriteLine("  " + k + "   (preserved on save)");
+                any = true;
+            }
+            if (!any) Console.WriteLine("  none");
+
+            Console.WriteLine();
+            Console.WriteLine("Nothing was written. This command is read-only.");
+            return 0;
         }
 
         /// <summary>Prints the device list the settings dialog would show. Diagnostic only.</summary>

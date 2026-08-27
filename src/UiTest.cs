@@ -123,6 +123,24 @@ namespace Arp
             return ok;
         }
 
+        /// <summary>Window class of a control, e.g. "Static", "Button", "ListBox".</summary>
+        private static string ClassOf(IntPtr dlg, int id)
+        {
+            IntPtr h = Win32.GetDlgItem(dlg, id);
+            if (h == IntPtr.Zero) return "";
+            var sb = new System.Text.StringBuilder(64);
+            Win32.GetClassNameW(h, sb, sb.Capacity);
+            return sb.ToString();
+        }
+
+        /// <summary>True when Tab can land on the control.</summary>
+        private static bool Focusable(IntPtr dlg, int id)
+        {
+            IntPtr h = Win32.GetDlgItem(dlg, id);
+            if (h == IntPtr.Zero) return false;
+            return (Win32.GetWindowLongPtr(h, Win32.GWL_STYLE).ToInt64() & Win32.WS_TABSTOP) != 0;
+        }
+
         private static int ComboCount(IntPtr h, int id) =>
             (int)Win32.SendDlgItemMessageW(h, id, Win32.CB_GETCOUNT, IntPtr.Zero, IntPtr.Zero);
 
@@ -323,13 +341,16 @@ namespace Arp
         {
             Say("-- Read-only text lists");
 
-            var dlg = new ConfirmDialog("probe", "seed", "ok", "no");
+            // Probed against a real list box. The dashboard overview and live
+            // statistics use the same helper.
+            var dlg = new UpdateDialog("v1", "v2", "seed");
             IntPtr h = Open(dlg, "ListProbe");
             if (h == IntPtr.Zero) return;
 
             try
             {
-                int id = ConfirmDialog.IdText;
+                int id = UpdateDialog.IdList;
+                Eq(ClassOf(h, id), "ListBox", "the probe control really is a list box");
 
                 Win32.ListSetLines(h, id, "alpha\nbeta\ngamma");
                 Eq(Win32.ListCount(h, id), 3, "three lines become three items");
@@ -377,10 +398,13 @@ namespace Arp
                     Has(h, RepairDialog.IdRepair, "Repair button");
                     Has(h, RepairDialog.IdLeave, "Leave alone button");
                     Has(h, RepairDialog.IdForget, "Forget button");
-                    Check(Win32.ListGetAll(h, RepairDialog.IdText).Contains("20260826_140309.wav"),
+
+                    // The message must be static text: a screen reader then
+                    // speaks the whole prompt on open and Tab cycles buttons.
+                    Eq(ClassOf(h, RepairDialog.IdText), "Static", "repair message is static text");
+                    Check(Win32.GetDlgItemText(h, RepairDialog.IdText).Contains("20260826_140309.wav"),
                         "repair prompt names the file");
-                    Check(Win32.ListCount(h, RepairDialog.IdText) >= 3,
-                        "repair prompt reads as separate lines");
+                    Check(!Focusable(h, RepairDialog.IdText), "repair message is not a tab stop");
                 }
                 finally { Close(h); }
             }
@@ -394,7 +418,8 @@ namespace Arp
                     Has(h, UpdateDialog.IdList, "Release notes list");
                     Has(h, UpdateDialog.IdUpdate, "Update now button");
                     Has(h, UpdateDialog.IdSkip, "Skip button");
-                    Check(Win32.ListGetAll(h, UpdateDialog.IdInfo).Contains("v2.0.0 to v2.1.0"),
+                    Eq(ClassOf(h, UpdateDialog.IdInfo), "Static", "update headline is static text");
+                    Check(Win32.GetDlgItemText(h, UpdateDialog.IdInfo).Contains("v2.0.0 to v2.1.0"),
                         "update prompt names both versions");
                     int count = (int)Win32.SendDlgItemMessageW(h, UpdateDialog.IdList, 0x018B, IntPtr.Zero, IntPtr.Zero);
                     Eq(count, 3, "blank lines dropped from release notes");
@@ -410,9 +435,10 @@ namespace Arp
                 {
                     Has(h, ConfirmDialog.IdAccept, "Accept button");
                     Has(h, ConfirmDialog.IdReject, "Reject button");
-                    Check(Win32.ListGetAll(h, ConfirmDialog.IdText).Contains("line two"),
+                    Eq(ClassOf(h, ConfirmDialog.IdText), "Static", "confirm message is static text");
+                    Check(Win32.GetDlgItemText(h, ConfirmDialog.IdText).Contains("line two"),
                         "confirm text carries both lines");
-                    Eq(Win32.ListCount(h, ConfirmDialog.IdText), 2, "confirm text is two list items");
+                    Check(!Focusable(h, ConfirmDialog.IdText), "confirm message is not a tab stop");
                 }
                 finally { Close(h); }
             }

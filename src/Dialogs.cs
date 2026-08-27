@@ -255,23 +255,23 @@ namespace Arp
 
         protected override byte[] BuildTemplate()
         {
-            var b = new DialogBuilder("Incomplete Recording Detected", 320, 130);
-            b.TextList(IdText, 8, 8, 304, 62);
-            b.DefButton(IdRepair, "Yes, &Repair Recording", 8, 78, 100, 16);
-            b.Button(IdLeave, "&No, Leave it alone", 114, 78, 92, 16);
-            b.Button(IdForget, "&Forget this recovery information", 8, 100, 150, 16);
+            // The message is static text so the screen reader speaks the whole
+            // prompt as the dialog opens, and Tab then cycles the buttons.
+            string message =
+                "Audio Recorder Pro was closed unexpectedly during your last session, " +
+                "and a recording may not have been finalized correctly.\n\n" +
+                "File: " + _filepath + "\n\n" +
+                "Would you like to attempt to repair this audio file now?";
+
+            var b = new DialogBuilder("Incomplete Recording Detected", 320, 138);
+            b.MessageText(IdText, message, 10, 10, 300, 76);
+            b.DefButton(IdRepair, "Yes, &Repair Recording", 10, 94, 104, 16);
+            b.Button(IdLeave, "&No, Leave it alone", 120, 94, 96, 16);
+            b.Button(IdForget, "&Forget this recovery information", 10, 116, 150, 16);
             return b.Build();
         }
 
-        protected override void OnInit()
-        {
-            Win32.ListSetLines(Hwnd, IdText,
-                "Audio Recorder Pro was closed unexpectedly during your last session.\n" +
-                "A recording may not have been finalized correctly.\n" +
-                "File: " + _filepath + "\n" +
-                "Would you like to attempt to repair this audio file now?");
-            Focus(IdRepair);
-        }
+        protected override void OnInit() => Focus(IdRepair);
 
         protected override bool OnCommand(int id, int code)
         {
@@ -309,21 +309,23 @@ namespace Arp
 
         protected override byte[] BuildTemplate()
         {
+            // The headline is static text so it is spoken as the dialog opens.
+            // The notes stay a list, because that is genuinely a list of
+            // changes worth arrowing through one at a time.
+            string headline = "There's an update available. You will be upgrading from version " +
+                              _current + " to " + _newVersion + ".";
+
             var b = new DialogBuilder("Update Available", 320, 190);
-            b.TextList(IdInfo, 8, 8, 304, 24);
-            b.Label("What's new:", 8, 38, 100, 10, IdWhatsNew);
-            b.ListBox(IdList, 8, 52, 304, 100);
-            b.DefButton(IdUpdate, "&Update Now", 8, 160, 80, 16);
-            b.Button(IdSkip, "&Don't Update", 94, 160, 80, 16);
+            b.MessageText(IdInfo, headline, 10, 8, 300, 20);
+            b.Label("&What's new:", 10, 34, 100, 10, IdWhatsNew);
+            b.ListBox(IdList, 10, 48, 300, 100);
+            b.DefButton(IdUpdate, "&Update Now", 10, 158, 80, 16);
+            b.Button(IdSkip, "&Don't Update", 96, 158, 80, 16);
             return b.Build();
         }
 
         protected override void OnInit()
         {
-            Win32.ListSetLines(Hwnd, IdInfo,
-                "There's an update available.\n" +
-                "You will be upgrading from version " + _current + " to " + _newVersion + ".");
-
             foreach (string raw in _notes.Split('\n'))
             {
                 string line = raw.Trim();

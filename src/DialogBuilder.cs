@@ -92,6 +92,24 @@ namespace Arp
             return this;
         }
 
+        /// <summary>
+        /// The body of a prompt: wrapping static text that is not focusable.
+        ///
+        /// This is what makes a prompt behave like a message box. A screen
+        /// reader announces the caption and the whole of this text as the
+        /// dialog opens, and Tab then moves only between the buttons. Putting
+        /// the text in a focusable control instead forces the reader to be
+        /// tabbed into and arrowed through before the question can be heard.
+        ///
+        /// SS_NOPREFIX keeps ampersands in file paths from being eaten as
+        /// Alt-shortcuts.
+        /// </summary>
+        public DialogBuilder MessageText(int id, string text, int x, int y, int cx, int cy)
+        {
+            AddItem(Win32.SS_LEFT | Win32.SS_NOPREFIX, 0, x, y, cx, cy, id, Win32.ATOM_STATIC, text);
+            return this;
+        }
+
         public DialogBuilder Edit(int id, int x, int y, int cx, int cy, uint extra = 0)
         {
             AddItem(Win32.ES_LEFT | Win32.ES_AUTOHSCROLL | Win32.WS_BORDER | Win32.WS_TABSTOP | extra,

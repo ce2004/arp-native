@@ -28,18 +28,14 @@ namespace Arp
 
         protected override byte[] BuildTemplate()
         {
-            var b = new DialogBuilder(_title, 300, 132);
-            b.TextList(IdText, 8, 8, 284, 90);
-            b.DefButton(IdAccept, _acceptText, 8, 106, 110, 16);
-            b.Button(IdReject, _rejectText, 126, 106, 90, 16);
+            var b = new DialogBuilder(_title, 300, 138);
+            b.MessageText(IdText, _message, 10, 10, 280, 92);
+            b.DefButton(IdAccept, _acceptText, 10, 110, 110, 16);
+            b.Button(IdReject, _rejectText, 128, 110, 90, 16);
             return b.Build();
         }
 
-        protected override void OnInit()
-        {
-            Win32.ListSetLines(Hwnd, IdText, _message);
-            Focus(IdAccept);
-        }
+        protected override void OnInit() => Focus(IdAccept);
 
         protected override bool OnCommand(int id, int code)
         {

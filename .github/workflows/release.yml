@@ -66,22 +66,22 @@ jobs:
           $exe = Get-Item "publish\${{ matrix.rid }}\ArpRecorder.exe"
           "${{ matrix.rid }}: {0:N2} MB" -f ($exe.Length / 1MB)
 
-      # Debug symbols are ~12 MB against a ~2.5 MB executable and are not
-      # needed to run it, so they stay out of the download. Stack traces are
-      # still enabled in the build; they just lose line numbers.
-      - name: Create archive
+      # The whole application is one executable, so that is what ships: no
+      # archive to unpack and nothing to place beside it. Debug symbols stay
+      # behind; they are ~12 MB against a ~2.8 MB program and are not needed to
+      # run it. The architecture is in the file name because the updater picks
+      # its download by matching it.
+      - name: Name the executable
         run: |
-          $files = Get-ChildItem "publish\${{ matrix.rid }}" -Recurse -File |
-                   Where-Object { $_.Extension -ne ".pdb" }
-          Write-Host "Packaging:"
-          $files | ForEach-Object { "  {0,10:N0}  {1}" -f $_.Length, $_.Name } | Write-Host
-          Compress-Archive -Path $files.FullName `
-                           -DestinationPath "Audio Recorder Pro-${{ matrix.rid }}.zip"
+          Copy-Item "publish\${{ matrix.rid }}\ArpRecorder.exe" `
+                    "ArpRecorder-${{ matrix.rid }}.exe"
+          $f = Get-Item "ArpRecorder-${{ matrix.rid }}.exe"
+          "Shipping {0} ({1:N2} MB)" -f $f.Name, ($f.Length / 1MB) | Write-Host
 
       - name: Generate SHA256 checksum
         run: |
-          $h = (Get-FileHash "Audio Recorder Pro-${{ matrix.rid }}.zip" -Algorithm SHA256).Hash
-          "$h  Audio Recorder Pro-${{ matrix.rid }}.zip" |
+          $h = (Get-FileHash "ArpRecorder-${{ matrix.rid }}.exe" -Algorithm SHA256).Hash
+          "$h  ArpRecorder-${{ matrix.rid }}.exe" |
             Out-File -FilePath "sha256-${{ matrix.rid }}.txt" -Encoding utf8 -NoNewline
 
       - name: Upload artifacts
@@ -89,7 +89,7 @@ jobs:
         with:
           name: ${{ matrix.rid }}
           path: |
-            Audio Recorder Pro-${{ matrix.rid }}.zip
+            ArpRecorder-${{ matrix.rid }}.exe
             sha256-${{ matrix.rid }}.txt
 
   release:
@@ -114,7 +114,12 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Get-ChildItem artifacts -Recurse -File | Move-Item -Destination dist
-          Get-Content dist\sha256-*.txt | Out-File dist\sha256sums.txt -Encoding utf8
+          # One checksum file covering both executables. The updater reads this
+          # and refuses to install anything whose hash does not match.
+          Get-ChildItem dist\sha256-*.txt |
+            ForEach-Object { (Get-Content $_ -Raw).Trim() } |
+            Out-File dist\sha256sums.txt -Encoding utf8
+          Remove-Item dist\sha256-*.txt
           Get-ChildItem dist
 
       # The app reads these notes aloud through the screen reader, so the commit
@@ -126,8 +131,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            dist/Audio Recorder Pro-win-x64.zip
-            dist/Audio Recorder Pro-win-arm64.zip
+            dist/ArpRecorder-win-arm64.exe
+            dist/ArpRecorder-win-x64.exe
             dist/sha256sums.txt
           body_path: release_notes.txt
         env:

@@ -268,6 +268,13 @@ namespace Arp
         public static extern IntPtr GetActiveWindow();
 
         public const int GWLP_WNDPROC = -4;
+        public const int GWL_STYLE = -16;
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int GetClassNameW(IntPtr hWnd, StringBuilder name, int max);
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+        public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int index);
 
         [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
         public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int index, IntPtr newLong);
