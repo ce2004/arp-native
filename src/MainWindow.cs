@@ -352,10 +352,10 @@ namespace Arp
             Notifier.Notify(title, msg, level);
         }
 
-        private void PlaySound(string name)
+        private void PlaySound(string eventName)
         {
-            if (!_cfg.SndEnabled(name)) return;
-            Sounds.Play(name, _cfg.SndVolume);
+            if (!_cfg.SndEnabled(eventName)) return;
+            Sounds.Play(_cfg.SoundFor(eventName), _cfg.SndVolume);
         }
 
         // ---- settings ----
@@ -469,10 +469,7 @@ namespace Arp
                     OnError = m => Post(() => HandleError(m)),
                     OnSplit = () => Post(OnSplitCompleted),
                     OnMicDisconnected = (n, cont) => Post(() => HandleMicDisconnect(n, cont)),
-                    // The Python build routes stall warnings through the same
-                    // error path, which stops the recording. Kept identical here
-                    // on purpose; see the notes for why it is worth revisiting.
-                    OnStallWarning = m => Post(() => HandleError(m)),
+                    OnStallChanged = (n, stalled) => Post(() => HandleStallChanged(n, stalled)),
                 };
 
                 _isRecording = true;
@@ -684,6 +681,36 @@ namespace Arp
             StopRecording(false);
             Notify("Error", "Recording failed.", "notify_error", Notifier.Level.Error);
             Critical(message, "Recording Error");
+        }
+
+        /// <summary>
+        /// An input went quiet, or came back. This never stops the recording.
+        ///
+        /// The Python build routed this into the error path, so two seconds of
+        /// no data from a device ended the session and popped a modal dialog,
+        /// turning a transient glitch into the permanent end of an unattended
+        /// recording. It is now a warning: the writer keeps going and fills the
+        /// gap with silence, and recovery is announced when data returns.
+        /// </summary>
+        private void HandleStallChanged(int inputNumber, bool stalled)
+        {
+            if (!_isRecording) return;
+
+            string what = _rec != null && _cfg.Device2Id != "none" ? "Input " + inputNumber : "The input";
+
+            if (stalled)
+            {
+                Speak(what + " stopped delivering audio. Still recording.");
+                Notify("Input Stalled",
+                    what + " stopped delivering audio. Recording continues.",
+                    "notify_error", Notifier.Level.Warning);
+            }
+            else
+            {
+                Speak(what + " is delivering audio again.");
+                Notify("Input Recovered", what + " is delivering audio again.",
+                    "notify_error");
+            }
         }
 
         private void HandleDriveDisconnect(string drive)

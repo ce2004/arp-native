@@ -7,141 +7,20 @@ using System.Threading;
 namespace Arp
 {
     /// <summary>
-    /// The four UI cues. Rather than shipping the WAVs alongside the exe, the
-    /// tones are regenerated at startup with the exact algorithm from the Python
-    /// build's gen_sounds.py, so a single self-contained binary stays a single
-    /// file. A sounds\*.wav next to the exe still wins if present, which keeps
-    /// custom cues working.
+    /// Plays a named cue from <see cref="SoundLibrary"/> at the configured
+    /// volume. Every sound is generated in code, so there is no sounds folder
+    /// and nothing to ship beside the executable.
     /// </summary>
     internal static class Sounds
     {
-        private const int Rate = 44100;
+        private const int Rate = SoundLibrary.Rate;
 
-        private static readonly Dictionary<string, short[]> Cache = new(StringComparer.OrdinalIgnoreCase);
-        private static readonly object Gate = new();
+        public static void Preload() => SoundLibrary.Preload();
 
-        public static void Preload()
+        /// <summary>Plays a cue by library name, scaled to the given volume.</summary>
+        public static void Play(string soundName, int volumePercent)
         {
-            foreach (string n in new[] { "start", "stop", "pause", "unpause" }) Get(n);
-        }
-
-        private static short[] Get(string name)
-        {
-            lock (Gate)
-            {
-                if (Cache.TryGetValue(name, out var cached)) return cached;
-
-                short[] samples = null;
-                try
-                {
-                    string path = Path.Combine(AppContext.BaseDirectory, "sounds", name + ".wav");
-                    if (File.Exists(path)) samples = ReadPcm16Mono(path);
-                }
-                catch (Exception e)
-                {
-                    Log.Warn("Failed reading sounds\\" + name + ".wav: " + e.Message);
-                }
-
-                samples ??= Generate(name);
-                Cache[name] = samples;
-                return samples;
-            }
-        }
-
-        // Identical to gen_sounds.py, including the 400-sample fades and the
-        // phase-accumulated sweep, so the cues sound the same as before.
-        internal static short[] Generate(string name)
-        {
-            switch (name.ToLowerInvariant())
-            {
-                case "start": return Tone(440, 880, 200);
-                case "stop": return Tone(880, 440, 200);
-                case "pause": return DoubleBeep(400);
-                case "unpause": return DoubleBeep(800);
-                default: return Array.Empty<short>();
-            }
-        }
-
-        private static short[] Tone(double fStart, double fEnd, int durationMs)
-        {
-            int n = (int)(Rate * (durationMs / 1000.0));
-            var outp = new short[n];
-            double phase = 0.0;
-            for (int i = 0; i < n; i++)
-            {
-                double freq = fStart + (fEnd - fStart) * ((double)i / n);
-                phase += 2 * Math.PI * freq / Rate;
-                double val = Math.Sin(phase);
-                outp[i] = (short)(int)(val * Envelope(i, n) * 32767);
-            }
-            return outp;
-        }
-
-        private static short[] DoubleBeep(double freq, int durationMs = 80, int gapMs = 40)
-        {
-            int beat = (int)(Rate * (durationMs / 1000.0));
-            int gap = (int)(Rate * (gapMs / 1000.0));
-            var outp = new short[beat * 2 + gap];
-            int p = 0;
-            for (int pass = 0; pass < 2; pass++)
-            {
-                for (int i = 0; i < beat; i++)
-                {
-                    double t = (double)i / Rate;
-                    double val = Math.Sin(2 * Math.PI * freq * t);
-                    outp[p++] = (short)(int)(val * Envelope(i, beat) * 32767);
-                }
-                if (pass == 0) p += gap; // silence
-            }
-            return outp;
-        }
-
-        private static double Envelope(int i, int n)
-        {
-            if (i < 400) return i / 400.0;
-            if (i > n - 400) return (n - i) / 400.0;
-            return 1.0;
-        }
-
-        private static short[] ReadPcm16Mono(string path)
-        {
-            var bytes = File.ReadAllBytes(path);
-            if (bytes.Length < 44) return null;
-            int dataPos = -1, dataLen = 0;
-            int channels = 1, bits = 16;
-
-            for (int i = 12; i + 8 <= bytes.Length;)
-            {
-                string id = System.Text.Encoding.ASCII.GetString(bytes, i, 4);
-                int size = BitConverter.ToInt32(bytes, i + 4);
-                if (size < 0 || i + 8 + size > bytes.Length) size = bytes.Length - i - 8;
-                if (id == "fmt ")
-                {
-                    channels = BitConverter.ToUInt16(bytes, i + 10);
-                    bits = BitConverter.ToUInt16(bytes, i + 22);
-                }
-                else if (id == "data")
-                {
-                    dataPos = i + 8;
-                    dataLen = size;
-                    break;
-                }
-                i += 8 + size + (size % 2);
-            }
-
-            if (dataPos < 0 || bits != 16) return null;
-
-            int frames = dataLen / 2 / Math.Max(1, channels);
-            var outp = new short[frames];
-            for (int f = 0; f < frames; f++)
-                outp[f] = BitConverter.ToInt16(bytes, dataPos + f * channels * 2);
-            return outp;
-        }
-
-        /// <summary>Plays a cue at the configured volume, mixed down in software.</summary>
-        public static void Play(string name, int volumePercent)
-        {
-            short[] src = Get(name);
+            short[] src = SoundLibrary.Get(soundName);
             if (src == null || src.Length == 0) return;
 
             double gain = Math.Clamp(volumePercent, 0, 100) / 100.0;

@@ -70,6 +70,7 @@ namespace Arp
                 cfg.NotifySplit = false;
                 cfg.SpeakInFocusOnly = true;
                 cfg.SndPause = false;
+                cfg.SetSoundFor("start", "Soft Chime");
 
                 TestSettings(cfg);
                 TestNotifications(cfg);
@@ -266,6 +267,29 @@ namespace Arp
                 Eq(Win32.IsChecked(h, SoundsDialog.IdPause), false, "snd_pause false reflected");
                 Eq(Win32.IsChecked(h, SoundsDialog.IdStart), true, "snd_start true reflected");
                 Eq(Win32.GetDlgItemText(h, SoundsDialog.IdVolume), "5 percent", "volume reads as a percentage");
+
+                // Each event picks its own sound from the built-in library.
+                var soundCombos = new[]
+                {
+                    (SoundsDialog.IdStartSound, "start"),
+                    (SoundsDialog.IdStopSound, "stop"),
+                    (SoundsDialog.IdPauseSound, "pause"),
+                    (SoundsDialog.IdUnpauseSound, "unpause"),
+                };
+
+                foreach (var (id, ev) in soundCombos)
+                {
+                    Has(h, id, ev + " sound");
+                    Eq(ComboCount(h, id), SoundLibrary.Names.Length,
+                        ev + " lists every built-in sound");
+                    Eq(Win32.ComboGetText(h, id), cfg.SoundFor(ev),
+                        ev + " selects the configured sound");
+                }
+
+                Eq(Win32.ComboGetText(h, SoundsDialog.IdStartSound), "Soft Chime",
+                    "a non-default sound is preselected from config");
+                Eq(Win32.ComboGetText(h, SoundsDialog.IdStopSound), "Falling Sweep",
+                    "an unset event keeps its default sound");
             }
             finally { Close(h); }
         }

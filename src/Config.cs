@@ -151,6 +151,35 @@ namespace Arp
             _ => true,
         };
 
+        /// <summary>The four events that can have a cue, in dialog order.</summary>
+        public static readonly string[] SoundEvents = { "start", "stop", "pause", "unpause" };
+
+        /// <summary>
+        /// Defaults reproduce the original cues, so an existing install sounds
+        /// exactly as it did before the per-event choice existed.
+        /// </summary>
+        public static string DefaultSoundFor(string eventName) => eventName switch
+        {
+            "start" => "Rising Sweep",
+            "stop" => "Falling Sweep",
+            "pause" => "Low Double Beep",
+            "unpause" => "High Double Beep",
+            _ => SoundLibrary.None,
+        };
+
+        public string SoundFor(string eventName)
+        {
+            string name = S("snd_" + eventName + "_sound", null);
+            // An unknown name (hand-edited config, or a sound removed in a later
+            // version) falls back rather than silently playing nothing.
+            if (string.IsNullOrEmpty(name) || !SoundLibrary.IsKnown(name))
+                return DefaultSoundFor(eventName);
+            return name;
+        }
+
+        public void SetSoundFor(string eventName, string soundName) =>
+            Set("snd_" + eventName + "_sound", soundName);
+
         public bool NotifyEnabled(string key) => B(key, true);
     }
 }

@@ -78,7 +78,14 @@ namespace Arp
         }
     }
 
-    /// <summary>"Configure Sounds" — the four cue toggles and the volume.</summary>
+    /// <summary>
+    /// "Configure Sounds" — for each event, whether it plays and which of the
+    /// built-in sounds it uses.
+    ///
+    /// Choosing a sound plays it immediately. Picking a cue by name is
+    /// meaningless without hearing it, so arrowing through the list auditions
+    /// each one at the volume it will actually be used at.
+    /// </summary>
     internal sealed class SoundsDialog : DialogBase
     {
         internal const int IdStart = 1201;
@@ -87,29 +94,39 @@ namespace Arp
         internal const int IdUnpause = 1204;
         internal const int IdVolume = 1205;
 
+        internal const int IdStartSound = 1211;
+        internal const int IdStopSound = 1212;
+        internal const int IdPauseSound = 1213;
+        internal const int IdUnpauseSound = 1214;
+
+        private static readonly (string Event, int Check, int Combo, string Label)[] Rows =
+        {
+            ("start",   IdStart,   IdStartSound,   "Play sound on &Start"),
+            ("stop",    IdStop,    IdStopSound,    "Play sound on Sto&p"),
+            ("pause",   IdPause,   IdPauseSound,   "Play sound on Pau&se"),
+            ("unpause", IdUnpause, IdUnpauseSound, "Play sound on &Unpause"),
+        };
+
         private readonly Config _cfg;
         private SpinEdit _volume;
+        private bool _ready; // suppresses previews while populating
 
         public SoundsDialog(Config cfg) => _cfg = cfg;
 
         protected override byte[] BuildTemplate()
         {
-            var b = new DialogBuilder("Configure Sounds", 260, 116);
+            var b = new DialogBuilder("Configure Sounds", 300, 130);
             int y = 8;
-            void Row(int id, string text)
+            foreach (var r in Rows)
             {
-                b.CheckBox(id, text, 8, y, 244, 14);
-                y += 16;
+                b.CheckBox(r.Check, r.Label, 8, y + 1, 118, 13);
+                b.Combo(r.Combo, 132, y, 160, 120);
+                y += 18;
             }
 
-            Row(IdStart, "Play sound on Start");
-            Row(IdStop, "Play sound on Stop");
-            Row(IdPause, "Play sound on Pause");
-            Row(IdUnpause, "Play sound on Unpause");
-
-            b.Label("Sound Effects &Volume:", 8, y + 3, 100, 10);
-            b.Edit(IdVolume, 112, y, 90, 14);
-            y += 22;
+            b.Label("Sound Effects &Volume:", 8, y + 4, 100, 10);
+            b.Edit(IdVolume, 132, y, 90, 13);
+            y += 20;
 
             b.DefButton(Win32.IDOK, "Save && Close", 8, y + 4, 80, 16);
             return b.Build();
@@ -122,13 +139,32 @@ namespace Arp
             Checked(IdPause, _cfg.SndPause);
             Checked(IdUnpause, _cfg.SndUnpause);
 
+            foreach (var r in Rows)
+            {
+                foreach (string name in SoundLibrary.Names)
+                    Win32.ComboAdd(Hwnd, r.Combo, name, 0);
+                Win32.ComboSelectByText(Hwnd, r.Combo, _cfg.SoundFor(r.Event));
+            }
+
             _volume = new SpinEdit(Hwnd, IdVolume, 1, 100, 1,
                 PercentText.Format, t => PercentText.Parse(t, _cfg.SndVolume));
             _volume.Value = _cfg.SndVolume;
+
+            _ready = true;
         }
 
         protected override bool OnCommand(int id, int code)
         {
+            if (_ready && code == Win32.CBN_SELCHANGE)
+            {
+                foreach (var r in Rows)
+                {
+                    if (r.Combo != id) continue;
+                    Sounds.Play(Win32.ComboGetText(Hwnd, id), _volume?.Value ?? _cfg.SndVolume);
+                    return true;
+                }
+            }
+
             if (id == Win32.IDOK)
             {
                 _cfg.SndStart = Checked(IdStart);
@@ -136,6 +172,10 @@ namespace Arp
                 _cfg.SndPause = Checked(IdPause);
                 _cfg.SndUnpause = Checked(IdUnpause);
                 _cfg.SndVolume = _volume.Value;
+
+                foreach (var r in Rows)
+                    _cfg.SetSoundFor(r.Event, Win32.ComboGetText(Hwnd, r.Combo));
+
                 _cfg.Save();
                 Close(1);
                 return true;

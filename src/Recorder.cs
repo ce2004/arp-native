@@ -173,7 +173,15 @@ namespace Arp
         public Action<string> OnError;
         public Action OnSplit;
         public Action<int, bool> OnMicDisconnected;
-        public Action<string> OnStallWarning;
+
+        /// <summary>
+        /// Raised when an input stops delivering audio for two seconds, and
+        /// again with false when it starts delivering again. This is a warning
+        /// only: the recording keeps running and silence is written for the
+        /// quiet input, so a transient driver hiccup costs a gap rather than
+        /// the rest of the session.
+        /// </summary>
+        public Action<int, bool> OnStallChanged;
 
         public string SessionFolder { get; private set; }
         public string CurrentFilename => _currentFilename;
@@ -418,15 +426,20 @@ namespace Arp
                         if (!mic1Silent) lastMic1Real = curr;
                         if (_r2 != null && !mic2Silent) lastMic2Real = curr;
 
+                        // A stall is reported, not acted on. Recovery is
+                        // reported too, which is why the flag is cleared rather
+                        // than latched: an input that comes back should say so.
                         if (curr - lastMic1Real > 2.0 && !mic1Stalled)
                         {
                             mic1Stalled = true;
-                            Log.Warn("Mic 1 thread stalled! No blocks received for 2 seconds.");
-                            OnStallWarning?.Invoke("Warning: Input 1 stopped delivering audio (stalled)!");
+                            Log.Warn("Mic 1 stalled: no blocks received for 2 seconds. Recording continues.");
+                            OnStallChanged?.Invoke(1, true);
                         }
                         else if (curr - lastMic1Real <= 2.0 && mic1Stalled)
                         {
                             mic1Stalled = false;
+                            Log.Info("Mic 1 recovered and is delivering audio again.");
+                            OnStallChanged?.Invoke(1, false);
                         }
 
                         if (_r2 != null)
@@ -434,12 +447,14 @@ namespace Arp
                             if (curr - lastMic2Real > 2.0 && !mic2Stalled)
                             {
                                 mic2Stalled = true;
-                                Log.Warn("Mic 2 thread stalled! No blocks received for 2 seconds.");
-                                OnStallWarning?.Invoke("Warning: Input 2 stopped delivering audio (stalled)!");
+                                Log.Warn("Mic 2 stalled: no blocks received for 2 seconds. Recording continues.");
+                                OnStallChanged?.Invoke(2, true);
                             }
                             else if (curr - lastMic2Real <= 2.0 && mic2Stalled)
                             {
                                 mic2Stalled = false;
+                                Log.Info("Mic 2 recovered and is delivering audio again.");
+                                OnStallChanged?.Invoke(2, false);
                             }
                         }
 

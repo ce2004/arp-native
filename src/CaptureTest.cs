@@ -119,11 +119,14 @@ namespace Arp
                     OnError = m => { lock (errors) errors.Add(m); Say("   [error] " + m); },
                     OnSplit = () => { Interlocked.Increment(ref splitEvents); Say("   [split]"); },
                     OnMicDisconnected = (n, c) => { lock (errors) errors.Add("mic " + n + " disconnected"); },
-                    // Tracked apart from errors: in the app this same callback
-                    // routes into the error path and stops the recording, which
-                    // is inherited from the Python build and is why an input
-                    // that goes quiet for two seconds is worth flagging.
-                    OnStallWarning = m => { lock (stalls) stalls.Add(m); Say("   [stall] " + m); },
+                    // A stall is a warning only; the recording keeps running and
+                    // fills the gap with silence, and recovery is reported too.
+                    OnStallChanged = (n, stalled) =>
+                    {
+                        string m = "input " + n + (stalled ? " stalled" : " recovered");
+                        lock (stalls) stalls.Add(m);
+                        Say("   [stall] " + m);
+                    },
                 };
 
                 var sw = Stopwatch.StartNew();
@@ -159,8 +162,8 @@ namespace Arp
                     "finalisation succeeded (was " + session.Finalization + ")");
                 Check(session.DroppedBlocks == 0, "no dropped blocks (" + session.DroppedBlocks + ")");
                 Say("   Silence blocks substituted: " + session.SilenceBlocks);
-                Say("   Stall warnings: " + stalls.Count +
-                    (stalls.Count > 0 ? "  <- would stop the recording in the app" : ""));
+                Say("   Stall events: " + stalls.Count +
+                    (stalls.Count > 0 ? "  (warning only; recording continued)" : ""));
 
                 var files = new List<string>(Directory.GetFiles(rec.SessionFolder, "*.wav"));
                 files.Sort(StringComparer.Ordinal);

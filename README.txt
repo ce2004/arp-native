@@ -244,16 +244,28 @@ every control is a real Win32 control.
 
 The controller client must match the architecture of THIS process, not NVDA's,
 which is a real trap here: NVDA itself is an x64 build running under emulation
-on ARM64, but a native ARM64 recorder still needs the ARM64 client. Both are
-present and are copied next to the executable by the build:
+on ARM64, but a native ARM64 recorder still needs the ARM64 client.
 
-  native\win-x64\nvdaControllerClient64.dll      (x64 build)
-  native\win-arm64\nvdaControllerClientArm64.dll (ARM64 build)
+The client is EMBEDDED IN THE EXECUTABLE. It is a native DLL and cannot be
+linked in, so the matching one is carried as a resource and unpacked on first
+run to:
 
-Both came from NVDA 2026.1's official controllerClient package and are LGPL;
-native\NVDA-controllerClient-LICENSE.txt ships alongside them. To update them,
-download nvda_<version>_controllerClient.zip from nvaccess.org and copy the
-arm64 and x64 DLLs into those folders under the names above.
+  %LOCALAPPDATA%\Audio Recorder Pro\nvdaControllerClient<arch>.dll
+
+An existing copy of the right size is reused, and a copy locked by another
+running instance is loaded as it stands. That is what lets the whole
+application ship as one file with nothing beside it.
+
+A DLL placed next to the executable still wins, so a newer NVDA client can be
+dropped in without rebuilding. Sources for the build:
+
+  native\win-x64\nvdaControllerClient64.dll      (embedded into the x64 build)
+  native\win-arm64\nvdaControllerClientArm64.dll (embedded into the ARM64 build)
+
+Both came from NVDA 2026.1's official controllerClient package and are LGPL.
+The licence is embedded too and written out beside the unpacked DLL. To update
+them, download nvda_<version>_controllerClient.zip from nvaccess.org and copy
+the arm64 and x64 DLLs into those folders under the names above.
 
 To check speech is working:
 
@@ -279,6 +291,42 @@ a very long press of the up arrow. Up, Down, Home and End still nudge the
 number and speak the result. When a setting is loaded the largest unit that
 divides it exactly is chosen, so 5400 seconds reads back as 90 minutes and
 7200 as 2 hours.
+
+SOUNDS
+
+Every cue is generated in code at startup. There is no sounds folder and
+nothing to ship beside the executable. The library is in SoundLibrary.cs:
+
+  None              Rising Sweep      Falling Sweep
+  Low Double Beep   High Double Beep  Two Tone Up
+  Two Tone Down     Soft Chime        Short Blip
+  Triple Blip       Low Thud          Alert Warble
+
+Each of the four events - start, stop, pause, unpause - has its own checkbox
+and its own sound combo in Configure Sounds. Choosing a sound plays it
+immediately at the configured volume, because picking a cue by name is
+meaningless without hearing it.
+
+The first four sounds reproduce the original cues sample for sample and remain
+the defaults, so an existing install sounds exactly as it did. The choices are
+stored as snd_<event>_sound; an unrecognised name falls back to the default
+rather than silently playing nothing.
+
+INPUT STALLS
+
+If an input stops delivering audio for two seconds, the recording KEEPS GOING.
+It is announced, a notification is raised, silence is written for the quiet
+input, and recovery is announced when data returns.
+
+This is a deliberate departure from the Python build, which routed the same
+condition into its error path and stopped the recording behind a modal dialog.
+That turned a transient driver hiccup, or simply using a loopback input while
+nothing was playing, into the permanent end of an unattended session. Note that
+a genuinely dead device is a different path: the reader thread ends, which is
+handled as a disconnect and does honour auto-resume.
+
+Silence in the room is not a stall. A working microphone in a quiet room still
+sends a continuous stream of zeros, which is data.
 
 NOTIFICATIONS
 
@@ -309,8 +357,9 @@ LAYOUT
   src\Monitors.cs       drive monitor and auto-resume watcher
   src\Config.cs         settings, shared with the Python build
   src\Json.cs           minimal order-preserving JSON
-  src\Speech.cs         NVDA controller client with SAPI fallback
-  src\Sounds.cs         cue generation and waveOut playback
+  src\Speech.cs         NVDA controller client, embedded and unpacked on demand
+  src\SoundLibrary.cs   the built-in cue set, generated in code
+  src\Sounds.cs         cue playback through waveOut
   src\Notifier.cs       shell tray balloon notifications
   src\Log.cs            rotating diagnostic log
   src\Updater.cs        update UI; the release feed is not yet wired up

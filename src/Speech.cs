@@ -57,14 +57,19 @@ namespace Arp
             string baseDir = AppContext.BaseDirectory;
             var candidates = new[]
             {
+                // A DLL placed beside the exe wins, so a newer NVDA client can
+                // be dropped in without rebuilding.
                 Path.Combine(baseDir, "nvdaControllerClient" + arch + ".dll"),
                 Path.Combine(baseDir, "nvdaControllerClient.dll"),
+                // Otherwise use the copy carried inside this executable.
+                Unpack(arch),
                 "nvdaControllerClient" + arch + ".dll",
                 "nvdaControllerClient.dll",
             };
 
             foreach (string c in candidates)
             {
+                if (string.IsNullOrEmpty(c)) continue;
                 if (!NativeLibrary.TryLoad(c, out IntPtr lib)) continue;
                 try
                 {
@@ -92,6 +97,87 @@ namespace Arp
             Log.Warn("No NVDA controller client found for " + arch +
                      "; spoken announcements are disabled. Place nvdaControllerClient" + arch +
                      ".dll next to the executable to enable them.");
+        }
+
+        /// <summary>
+        /// Writes the embedded controller client next to the settings file and
+        /// returns its path, or null if it could not be unpacked.
+        ///
+        /// A native DLL cannot be linked into the executable, so shipping one
+        /// file means carrying it as a resource and unpacking it once. An
+        /// existing copy of the right size is reused, and a copy currently
+        /// locked by another running instance is loaded as-is rather than
+        /// treated as an error.
+        /// </summary>
+        private static string Unpack(string arch)
+        {
+            try
+            {
+                var asm = typeof(Speech).Assembly;
+                using var src = asm.GetManifestResourceStream("nvdaControllerClient.dll");
+                if (src == null)
+                {
+                    Log.Info("No controller client is embedded in this build.");
+                    return null;
+                }
+
+                string dir = Config.AppDataDir;
+                string target = Path.Combine(dir, "nvdaControllerClient" + arch + ".dll");
+
+                var buffer = new byte[src.Length];
+                int read = 0;
+                while (read < buffer.Length)
+                {
+                    int n = src.Read(buffer, read, buffer.Length - read);
+                    if (n <= 0) break;
+                    read += n;
+                }
+
+                var existing = new FileInfo(target);
+                if (existing.Exists && existing.Length == buffer.Length) return target;
+
+                try
+                {
+                    // Write beside the target then swap, so a half-written file
+                    // is never left where the loader would find it.
+                    string tmp = target + ".tmp";
+                    File.WriteAllBytes(tmp, buffer);
+                    File.Move(tmp, target, true);
+                    Log.Info("Unpacked the embedded NVDA controller client to " + target);
+                }
+                catch (IOException)
+                {
+                    // Locked by another instance; the existing file is the same
+                    // build, so use it.
+                    if (existing.Exists) return target;
+                    throw;
+                }
+
+                WriteLicence(dir);
+                return target;
+            }
+            catch (Exception e)
+            {
+                Log.Warn("Could not unpack the embedded NVDA controller client: " + e.Message);
+                return null;
+            }
+        }
+
+        private static void WriteLicence(string dir)
+        {
+            try
+            {
+                var asm = typeof(Speech).Assembly;
+                using var src = asm.GetManifestResourceStream("NVDA-controllerClient-LICENSE.txt");
+                if (src == null) return;
+                string path = Path.Combine(dir, "NVDA-controllerClient-LICENSE.txt");
+                using var dest = File.Create(path);
+                src.CopyTo(dest);
+            }
+            catch (Exception e)
+            {
+                Log.Warn("Could not write the controller client licence: " + e.Message);
+            }
         }
 
         public static bool NvdaRunning()

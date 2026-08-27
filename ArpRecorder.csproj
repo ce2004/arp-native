@@ -38,21 +38,19 @@
     <Compile Include="src\**\*.cs" />
   </ItemGroup>
 
-  <!-- The NVDA controller client must match the architecture of THIS process,
-       not NVDA's. Drop the matching client into native\<rid>\ and it ships
-       beside the exe; if it is absent, speech falls back to SAPI. -->
-  <ItemGroup>
-    <None Include="native\$(RuntimeIdentifier)\*.dll"
-          Condition="'$(RuntimeIdentifier)' != ''"
-          CopyToOutputDirectory="PreserveNewest"
-          CopyToPublishDirectory="PreserveNewest"
-          Link="%(Filename)%(Extension)" />
-    <!-- The controller client is LGPL, so its licence ships with it. -->
-    <None Include="native\NVDA-controllerClient-LICENSE.txt"
-          Condition="'$(RuntimeIdentifier)' != ''"
-          CopyToOutputDirectory="PreserveNewest"
-          CopyToPublishDirectory="PreserveNewest"
-          Link="%(Filename)%(Extension)" />
+  <!-- The NVDA controller client is embedded rather than copied, so the whole
+       application ships as one executable with nothing beside it. It is a
+       native DLL and cannot be linked in, so it is unpacked next to the
+       settings file on first run and loaded from there. Only the client
+       matching this RID is embedded: it must match the architecture of THIS
+       process, not NVDA's. -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <EmbeddedResource Include="native\$(RuntimeIdentifier)\nvdaControllerClient*.dll"
+                      LogicalName="nvdaControllerClient.dll" />
+    <!-- The client is LGPL, so its licence travels with it and is written out
+         alongside the unpacked DLL. -->
+    <EmbeddedResource Include="native\NVDA-controllerClient-LICENSE.txt"
+                      LogicalName="NVDA-controllerClient-LICENSE.txt" />
   </ItemGroup>
 
 </Project>

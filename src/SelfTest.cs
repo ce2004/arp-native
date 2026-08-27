@@ -482,27 +482,82 @@ namespace Arp
 
             // gen_sounds.py produces four 44 byte + 17640 byte files, i.e. 8820
             // mono 16-bit frames each. Regenerating them has to match.
-            foreach (string name in new[] { "start", "stop", "pause", "unpause" })
+            // The four original cues are still the defaults and must be
+            // unchanged, so they are compared against gen_sounds.py output.
+            var legacy = new[]
             {
-                var samples = Sounds.Generate(name);
-                Eq(samples.Length, 8820, name + ".wav length matches gen_sounds.py");
+                ("start", "Rising Sweep"),
+                ("stop", "Falling Sweep"),
+                ("pause", "Low Double Beep"),
+                ("unpause", "High Double Beep"),
+            };
 
-                // The fade runs over 400 samples, so the first and last are at
-                // 1/400 of full scale rather than exactly zero.
-                Eq(samples[0], (short)0, name + " starts at silence (fade in)");
+            foreach (var (file, sound) in legacy)
+            {
+                var samples = SoundLibrary.Get(sound);
+                Eq(samples.Length, 8820, sound + " length matches gen_sounds.py");
+                Eq(samples[0], (short)0, sound + " starts at silence (fade in)");
                 Check(Math.Abs((int)samples[samples.Length - 1]) < 100,
-                    name + " ends inside the fade-out (" + samples[samples.Length - 1] + ")");
+                    sound + " ends inside the fade-out (" + samples[samples.Length - 1] + ")");
 
                 short peak = 0;
                 foreach (short s in samples) if (Math.Abs((int)s) > Math.Abs((int)peak)) peak = s;
-                Check(Math.Abs((int)peak) > 30000, name + " reaches near full scale");
+                Check(Math.Abs((int)peak) > 30000, sound + " reaches near full scale");
 
-                CompareToReference(name, samples);
+                CompareToReference(file, samples);
+                Eq(Config.DefaultSoundFor(file), sound, file + " still defaults to " + sound);
             }
 
             // The gap in a double beep must be actual silence.
-            var pause = Sounds.Generate("pause");
-            Eq(pause[3528 + 800], (short)0, "double beep gap is silent");
+            Eq(SoundLibrary.Get("Low Double Beep")[3528 + 800], (short)0, "double beep gap is silent");
+
+            // Every selectable sound must render cleanly: no clipping, a real
+            // signal, and no click from starting mid-waveform.
+            Eq(SoundLibrary.Names[0], SoundLibrary.None, "None is the first choice");
+            Eq(SoundLibrary.Get(SoundLibrary.None).Length, 0, "None renders as no audio");
+
+            foreach (string name in SoundLibrary.Names)
+            {
+                Check(SoundLibrary.IsKnown(name), name + " is recognised by IsKnown");
+                if (name == SoundLibrary.None) continue;
+
+                var s = SoundLibrary.Get(name);
+                Check(s.Length > 0, name + " renders audio");
+                Check(s.Length <= SoundLibrary.Rate, name + " is at most one second (" + s.Length + " samples)");
+
+                short peak = 0;
+                foreach (short v in s) if (Math.Abs((int)v) > Math.Abs((int)peak)) peak = v;
+                Check(Math.Abs((int)peak) > 8000, name + " is loud enough to hear (peak " + peak + ")");
+                Check(Math.Abs((int)peak) < 32767, name + " does not hit full scale (peak " + peak + ")");
+
+                // A cue that starts or ends abruptly produces an audible click.
+                Check(Math.Abs((int)s[0]) < 1500, name + " starts near silence (" + s[0] + ")");
+                Check(Math.Abs((int)s[s.Length - 1]) < 1500, name + " ends near silence (" + s[s.Length - 1] + ")");
+            }
+
+            Check(!SoundLibrary.IsKnown("Nonexistent Sound"), "an unknown name is rejected");
+
+            // A hand-edited or stale config must not silence a cue.
+            string probe = Path.Combine(Path.GetTempPath(), "arp_sound_probe.json");
+            try
+            {
+                File.WriteAllText(probe, "{\"snd_start_sound\": \"Deleted Sound\"}");
+                var cfg = new Config(probe);
+                Eq(cfg.SoundFor("start"), "Rising Sweep", "an unknown sound name falls back to the default");
+
+                cfg.SetSoundFor("start", "Soft Chime");
+                Eq(cfg.SoundFor("start"), "Soft Chime", "a chosen sound is returned");
+                cfg.Save();
+                Eq(new Config(probe).SoundFor("start"), "Soft Chime", "the chosen sound persists");
+
+                foreach (string ev in Config.SoundEvents)
+                    Check(SoundLibrary.IsKnown(Config.DefaultSoundFor(ev)),
+                        "default sound for " + ev + " exists in the library");
+            }
+            finally
+            {
+                try { File.Delete(probe); } catch { }
+            }
         }
 
         private static void CompareToReference(string name, short[] generated)
