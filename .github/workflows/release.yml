@@ -36,14 +36,19 @@ jobs:
       # cover config, the duration grammar, routing, the RF64 container and the
       # dialog templates. The device tests (--uitest, --captest, --signaltest)
       # need real audio endpoints and are run locally.
-      # The app is a WinExe, so its console output does not survive into the
-      # Actions log. The transcript it writes to TEMP is the reliable channel
-      # and has to be printed explicitly, on success and on failure alike.
+      # Two traps here, both because the app is a windowed (GUI subsystem) exe:
+      #   1. PowerShell does not wait for a WinExe and never sets
+      #      $LASTEXITCODE, so it must be launched with Start-Process -Wait
+      #      -PassThru and the exit code read from the process object.
+      #   2. Its console output does not reach the Actions log, so the
+      #      transcript it writes to TEMP has to be printed explicitly.
       - name: Run self-test
         if: matrix.rid == 'win-x64'
         run: |
-          .\publish\${{ matrix.rid }}\ArpRecorder.exe --selftest
-          $code = $LASTEXITCODE
+          $exe = ".\publish\${{ matrix.rid }}\ArpRecorder.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--selftest" -Wait -PassThru -NoNewWindow
+          $code = $p.ExitCode
+
           $report = Join-Path $env:TEMP 'arp_selftest_report.txt'
           if (Test-Path $report) {
             Write-Host "----- self-test transcript -----"
@@ -52,7 +57,9 @@ jobs:
           } else {
             Write-Host "No transcript was produced at $report"
           }
+
           if ($code -ne 0) { throw "Self-test failed with exit code $code" }
+          Write-Host "Self-test passed."
 
       - name: Report binary size
         run: |
