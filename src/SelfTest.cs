@@ -466,6 +466,18 @@ namespace Arp
             Check(WavFile.Repair(riff), "RIFF repair reports success");
             Check(WavFile.Verify(riff, 2, 44100), "repaired RIFF file verifies");
 
+            // A file still being written must never be offered for repair.
+            string live = Path.Combine(dir, "live.wav");
+            using (var held = new FileStream(live, FileMode.Create, FileAccess.Write, FileShare.Read))
+            {
+                held.Write(new byte[100]);
+                held.Flush();
+                Check(MainWindow.IsInUse(live), "a file held open for writing is detected as in use");
+            }
+            Check(!MainWindow.IsInUse(live), "the same file is free once the writer closes it");
+            Check(!MainWindow.IsInUse(Path.Combine(dir, "does-not-exist.wav")),
+                "a missing file is not reported as in use");
+
             // A non-WAV file must be refused, not mangled.
             string junk = Path.Combine(dir, "junk.wav");
             File.WriteAllBytes(junk, new byte[200]);

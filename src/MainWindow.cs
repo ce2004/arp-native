@@ -917,6 +917,20 @@ namespace Arp
                         continue;
                     }
 
+                    // A journal only means a recording did not close cleanly if
+                    // nothing is still writing to it. The Python build and this
+                    // one share the same journal path, so a session running in
+                    // either will leave one sitting there live; offering to
+                    // "repair" a file that is being recorded right now is both
+                    // alarming and useless. If the file is still locked for
+                    // writing, leave it alone.
+                    if (IsInUse(filepath))
+                    {
+                        Log.Info("Skipping recovery prompt: " + filepath +
+                                 " is still open, so a recording is in progress.");
+                        continue;
+                    }
+
                     long res = (long)new RepairDialog(filepath).ShowModal(Hwnd);
                     if (res == 1)
                     {
@@ -947,6 +961,38 @@ namespace Arp
         private static void TryDelete(string path)
         {
             try { File.Delete(path); } catch { }
+        }
+
+        /// <summary>
+        /// True when another process still holds the file open for writing.
+        /// Opening with no sharing succeeds only if nobody else has it.
+        /// </summary>
+        internal static bool IsInUse(string path)
+        {
+            try
+            {
+                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+                return false;
+            }
+            catch (FileNotFoundException)
+            {
+                // Derives from IOException, so it has to be caught first: a
+                // file that is not there is not a file in use.
+                return false;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return false;
+            }
+            catch (IOException)
+            {
+                return true;
+            }
+            catch
+            {
+                // Permission problems are not evidence of an active recording.
+                return false;
+            }
         }
 
         // ---- shutdown ----
