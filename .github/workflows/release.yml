@@ -36,11 +36,23 @@ jobs:
       # cover config, the duration grammar, routing, the RF64 container and the
       # dialog templates. The device tests (--uitest, --captest, --signaltest)
       # need real audio endpoints and are run locally.
+      # The app is a WinExe, so its console output does not survive into the
+      # Actions log. The transcript it writes to TEMP is the reliable channel
+      # and has to be printed explicitly, on success and on failure alike.
       - name: Run self-test
         if: matrix.rid == 'win-x64'
         run: |
           .\publish\${{ matrix.rid }}\ArpRecorder.exe --selftest
-          if ($LASTEXITCODE -ne 0) { throw "Self-test failed" }
+          $code = $LASTEXITCODE
+          $report = Join-Path $env:TEMP 'arp_selftest_report.txt'
+          if (Test-Path $report) {
+            Write-Host "----- self-test transcript -----"
+            Get-Content $report | Write-Host
+            Write-Host "--------------------------------"
+          } else {
+            Write-Host "No transcript was produced at $report"
+          }
+          if ($code -ne 0) { throw "Self-test failed with exit code $code" }
 
       - name: Report binary size
         run: |
