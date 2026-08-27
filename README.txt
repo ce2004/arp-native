@@ -360,23 +360,78 @@ repository GitHub answers 404 and no update is ever found.
 
 SOUNDS
 
-Every cue is generated in code at startup. There is no sounds folder and
-nothing to ship beside the executable. The library is in SoundLibrary.cs:
+Sixty five cues, all generated in code on first use. There is no sounds folder
+and nothing to ship beside the executable. The library is in SoundLibrary.cs
+and groups into melodies, notification tones, alerts, and short subtle ones:
 
-  None              Rising Sweep      Falling Sweep
-  Low Double Beep   High Double Beep  Two Tone Up
-  Two Tone Down     Soft Chime        Short Blip
-  Triple Blip       Low Thud          Alert Warble
+  Melodies         Major and Minor Triad Up and Down, Perfect Fifth,
+                   Octave Leap, Fanfare, Little Fanfare, Pentatonic Run Up
+                   and Down, Question, Answer, Music Box, Lullaby, Waltz,
+                   Skip Step, Cascade, Staircase
+
+  Notifications    Gentle Ping, Bright Ping, Soft Pop, Bubble, Marimba,
+                   Wood Block, Glass Tap, Crystal, Bell Ding, Doorbell,
+                   Elevator Chime, Submarine Ping, Radar Blip, Harp Pluck,
+                   Kalimba, Celesta
+
+  Alerts           Gentle Alert, Urgent Alert, Siren Sweep, Warning Trill,
+                   Error Low, Error Double, Attention Rise, Attention Fall,
+                   Klaxon, Buzz
+
+  Subtle           Tick, Tock, Soft Click, Whoosh Up, Whoosh Down, Air Puff,
+                   Heartbeat, Pulse, Drip, Ripple
+
+  Original cues    Rising Sweep, Falling Sweep, Low Double Beep,
+                   High Double Beep, Two Tone Up, Two Tone Down, Soft Chime,
+                   Short Blip, Triple Blip, Low Thud, Alert Warble
+
+Plus None, which plays nothing.
 
 Each of the four events - start, stop, pause, unpause - has its own checkbox
 and its own sound combo in Configure Sounds. Choosing a sound plays it
 immediately at the configured volume, because picking a cue by name is
-meaningless without hearing it.
+meaningless without hearing it. "ArpRecorder.exe --sounds" lists them all with
+their duration and level.
+
+Notes are built from decaying partials mixed onto a floating point canvas and
+normalised once at the end, so cues can overlap and ring into each other
+without clipping and every one lands at a comparable loudness. Bell voices use
+the classic inharmonic 2.76 and 5.4 partials; noise for the whooshes comes from
+a fixed seed so a cue sounds identical every time.
 
 The first four sounds reproduce the original cues sample for sample and remain
 the defaults, so an existing install sounds exactly as it did. The choices are
 stored as snd_<event>_sound; an unrecognised name falls back to the default
 rather than silently playing nothing.
+
+The gen_sounds.py script that produced the old WAV files has been deleted from
+the Python repository; nothing referenced it at runtime and the sounds folder
+that build still reads was left alone.
+
+POWER AND RESPONSIVENESS
+
+While idle the application does no polling at all. The drive watcher only runs
+during a recording, because a drive going missing only matters while something
+is being written to it; leaving it running woke the machine once a second for
+as long as the window was open. Removal is noticed instantly anyway through the
+WM_DEVICECHANGE broadcast Windows sends to every top level window, which costs
+nothing, so the watcher's own poll is a slow five second backstop.
+
+While recording, the capture thread is event driven: WASAPI signals it when a
+buffer is ready rather than being asked on a timer. A device that will not
+accept event mode alongside the format converter falls back to polling at about
+half a block, which is still far less often than a fixed short poll. The log
+records which mode each input negotiated.
+
+Startup does no blocking work. The update check runs on its own thread, so the
+window appears immediately instead of waiting on a network round trip, and cues
+are built the first time they are played rather than all at once up front.
+
+Closing is immediate. The watcher threads wait on an event rather than sleeping,
+so stopping them returns at once instead of sitting out the remainder of a
+one second sleep.
+
+Measured with "ArpRecorder.exe --timing".
 
 INPUT STALLS
 

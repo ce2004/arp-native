@@ -46,13 +46,32 @@ namespace Arp
                 lock (Gate)
                 {
                     Rotate();
-                    File.AppendAllText(FilePath, line, Encoding.UTF8);
+                    Append(line);
                 }
             }
             catch
             {
                 // Logging must never take the recorder down.
             }
+        }
+
+        /// <summary>
+        /// Appends one line, sharing the file with anything else that has it
+        /// open.
+        ///
+        /// File.AppendAllText asks for FileShare.Read, which fails outright if
+        /// another process already holds the file for writing - and the Python
+        /// build logs to this same path. That silently threw away every line
+        /// this build produced whenever the other one was running. Sharing
+        /// read and write lets both append; each line is written in one call,
+        /// so lines do not interleave with each other.
+        /// </summary>
+        private static void Append(string line)
+        {
+            var bytes = Encoding.UTF8.GetBytes(line);
+            using var fs = new FileStream(FilePath, FileMode.Append, FileAccess.Write,
+                FileShare.ReadWrite | FileShare.Delete);
+            fs.Write(bytes, 0, bytes.Length);
         }
 
         private static void Rotate()

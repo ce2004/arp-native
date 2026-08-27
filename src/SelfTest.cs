@@ -550,6 +550,44 @@ namespace Arp
 
             Check(!SoundLibrary.IsKnown("Nonexistent Sound"), "an unknown name is rejected");
 
+            // No two cues may be interchangeable: with a library this size it
+            // is easy for a generator tweak to collapse two entries into the
+            // same sound, and a picker full of duplicates is useless.
+            Eq(new List<string>(SoundLibrary.Names).Count,
+                new HashSet<string>(SoundLibrary.Names, StringComparer.OrdinalIgnoreCase).Count,
+                "every sound name is unique");
+
+            var rendered = new List<(string Name, short[] Data)>();
+            foreach (string n in SoundLibrary.Names)
+            {
+                if (n == SoundLibrary.None) continue;
+                rendered.Add((n, SoundLibrary.Get(n)));
+            }
+
+            int identical = 0;
+            string firstClash = null;
+            for (int i = 0; i < rendered.Count; i++)
+            {
+                for (int j = i + 1; j < rendered.Count; j++)
+                {
+                    if (!SameAudio(rendered[i].Data, rendered[j].Data)) continue;
+                    identical++;
+                    firstClash ??= rendered[i].Name + " and " + rendered[j].Name;
+                }
+            }
+            Check(identical == 0, "no two sounds are identical" +
+                (firstClash != null ? " (" + firstClash + ")" : ""));
+
+            Check(rendered.Count >= 60, "the library offers at least 60 sounds (" + rendered.Count + ")");
+        }
+
+        private static bool SameAudio(short[] a, short[] b)
+        {
+            if (a.Length != b.Length) return false;
+            for (int i = 0; i < a.Length; i++)
+                if (a[i] != b[i]) return false;
+            return true;
+
             // A hand-edited or stale config must not silence a cue.
             string probe = Path.Combine(Path.GetTempPath(), "arp_sound_probe.json");
             try

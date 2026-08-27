@@ -17,6 +17,18 @@ namespace Arp
         private volatile bool _running;
         private bool _lastStatus;
 
+        // Waiting on an event instead of sleeping means Stop returns at once.
+        // Sleeping meant the shutdown had to sit out whatever remained of the
+        // current second, which was most of the delay when closing the window.
+        private readonly ManualResetEventSlim _wake = new(false);
+
+        /// <summary>
+        /// How often the drive is polled. Only a backstop: removal normally
+        /// arrives instantly as a WM_DEVICECHANGE broadcast, so this can be
+        /// slow and cheap rather than once a second.
+        /// </summary>
+        private const int PollMs = 5000;
+
         public DriveMonitor(Func<string> getFolder, Action<string> onDisconnected)
         {
             _getFolder = getFolder;
@@ -36,14 +48,31 @@ namespace Arp
         {
             if (_running) return;
             _running = true;
+            _wake.Reset();
+            _lastStatus = CheckPresent(_getFolder());
             _thread = new Thread(Run) { IsBackground = true, Name = "DriveMonitor" };
             _thread.Start();
         }
 
         public void Stop()
         {
+            if (!_running) return;
             _running = false;
-            try { _thread?.Join(1500); } catch { }
+            _wake.Set();
+            try { _thread?.Join(1000); } catch { }
+            _thread = null;
+        }
+
+        public bool IsRunning => _running;
+
+        /// <summary>
+        /// Re-checks immediately. Called when Windows broadcasts a volume
+        /// change, so removal is noticed without waiting for the next poll.
+        /// </summary>
+        public void CheckNow()
+        {
+            if (!_running) return;
+            _wake.Set();
         }
 
         private void Run()
@@ -72,7 +101,9 @@ namespace Arp
                 {
                     Log.Warn("Drive monitor error: " + e.Message);
                 }
-                Thread.Sleep(1000);
+
+                _wake.Wait(PollMs);
+                _wake.Reset();
             }
         }
     }
@@ -89,6 +120,7 @@ namespace Arp
         private readonly Action<string> _onResume;
         private Thread _thread;
         private volatile bool _running;
+        private readonly ManualResetEventSlim _wake = new(false);
 
         public string Missing { get; set; }
         public bool IsRunning => _running;
@@ -113,6 +145,7 @@ namespace Arp
         public void Stop()
         {
             _running = false;
+            _wake.Set();
         }
 
         private void Run()
@@ -160,7 +193,8 @@ namespace Arp
                     {
                         Log.Warn("Auto-resume watcher error: " + e.Message);
                     }
-                    Thread.Sleep(1000);
+                    _wake.Wait(1000);
+                    _wake.Reset();
                 }
             }
             finally

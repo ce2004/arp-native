@@ -37,6 +37,7 @@ namespace Arp
         private const int eCapture = 1;
 
         private const int AUDCLNT_SHAREMODE_SHARED = 0;
+        private const uint AUDCLNT_STREAMFLAGS_EVENTCALLBACK = 0x00040000;
         private const uint AUDCLNT_STREAMFLAGS_LOOPBACK = 0x00020000;
         private const uint AUDCLNT_STREAMFLAGS_NOPERSIST = 0x00080000;
         private const uint AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY = 0x08000000;
@@ -63,6 +64,15 @@ namespace Arp
 
         [DllImport("ole32.dll")]
         private static extern int PropVariantClear(void* pv);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr CreateEventW(IntPtr attrs, bool manualReset, bool initialState, IntPtr name);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr h);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint WaitForSingleObject(IntPtr h, uint ms);
 
         public const int COINIT_APARTMENTTHREADED = 0x2;
         public const int COINIT_MULTITHREADED = 0x0;
@@ -229,7 +239,27 @@ namespace Arp
             private IntPtr _device;
             private IntPtr _client;
             private IntPtr _capture;
+            private IntPtr _dataReady;
             private bool _started;
+
+            /// <summary>True when the audio engine signals us instead of being polled.</summary>
+            public bool IsEventDriven => _dataReady != IntPtr.Zero;
+
+            /// <summary>
+            /// Blocks until the engine says a buffer is ready, or the timeout
+            /// elapses. Returns false on timeout so the caller stays responsive
+            /// to a stop request. Falls back to a plain sleep when the device
+            /// would not accept event mode.
+            /// </summary>
+            public bool WaitForData(int timeoutMs)
+            {
+                if (_dataReady == IntPtr.Zero)
+                {
+                    System.Threading.Thread.Sleep(timeoutMs);
+                    return true;
+                }
+                return WaitForSingleObject(_dataReady, (uint)timeoutMs) == 0;
+            }
 
             public int SampleRate { get; private set; }
             public int Channels { get; private set; }
@@ -271,12 +301,50 @@ namespace Arp
                                  AUDCLNT_STREAMFLAGS_NOPERSIST;
                     if (loopback) flags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
 
-                    // One second of ring buffer. Generous on purpose: the reader
-                    // polls, and an overrun would silently lose audio.
+                    // One second of ring buffer. Generous on purpose: an overrun
+                    // would silently lose audio.
                     const long oneSecond = 10_000_000;
 
+                    // Ask the audio engine to signal an event when a buffer is
+                    // ready, so the reader sleeps until there is work instead of
+                    // waking on a timer to ask. Not every device accepts this
+                    // alongside the format converter, so a rejection falls back
+                    // to polling rather than failing the recording.
                     int init = ((delegate* unmanaged[Stdcall]<IntPtr, int, uint, long, long, WAVEFORMATEXTENSIBLE*, Guid*, int>)Vt(s._client)[3])(
-                        s._client, AUDCLNT_SHAREMODE_SHARED, flags, oneSecond, 0, &wfx, null);
+                        s._client, AUDCLNT_SHAREMODE_SHARED, flags | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                        oneSecond, 0, &wfx, null);
+
+                    if (init >= 0)
+                    {
+                        s._dataReady = CreateEventW(IntPtr.Zero, false, false, IntPtr.Zero);
+                        int hr = s._dataReady == IntPtr.Zero
+                            ? -1
+                            : ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int>)Vt(s._client)[13])(s._client, s._dataReady);
+                        if (hr < 0)
+                        {
+                            Log.Info("SetEventHandle refused; falling back to polling.");
+                            if (s._dataReady != IntPtr.Zero) { CloseHandle(s._dataReady); s._dataReady = IntPtr.Zero; }
+                            init = -1;
+                        }
+                    }
+
+                    if (init < 0)
+                    {
+                        // A client that failed Initialize cannot be reused, so
+                        // activate a fresh one for the polling attempt.
+                        Release(s._client);
+                        s._client = IntPtr.Zero;
+                        fixed (Guid* iid = &IID_IAudioClient)
+                        {
+                            int hr = ((delegate* unmanaged[Stdcall]<IntPtr, Guid*, int, void*, IntPtr*, int>)Vt(s._device)[3])(
+                                s._device, iid, CLSCTX_ALL, null, &client);
+                            if (hr < 0) throw new COMException("Activate(IAudioClient) failed", hr);
+                        }
+                        s._client = client;
+
+                        init = ((delegate* unmanaged[Stdcall]<IntPtr, int, uint, long, long, WAVEFORMATEXTENSIBLE*, Guid*, int>)Vt(s._client)[3])(
+                            s._client, AUDCLNT_SHAREMODE_SHARED, flags, oneSecond, 0, &wfx, null);
+                    }
 
                     if (init < 0)
                         throw new COMException(
@@ -426,6 +494,7 @@ namespace Arp
                 Release(_capture); _capture = IntPtr.Zero;
                 Release(_client); _client = IntPtr.Zero;
                 Release(_device); _device = IntPtr.Zero;
+                if (_dataReady != IntPtr.Zero) { CloseHandle(_dataReady); _dataReady = IntPtr.Zero; }
             }
         }
     }

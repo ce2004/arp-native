@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Threading;
 
 namespace Arp
 {
@@ -77,9 +78,11 @@ namespace Arp
             Enable(IdPause, false);
             ShowStats(false);
 
+            // Created now but not started: a drive going missing only matters
+            // while something is being written to it. Leaving it running while
+            // idle woke the machine once a second for nothing.
             _driveMonitor = new DriveMonitor(() => _cfg.SaveFolder,
                 drive => Post(() => HandleDriveDisconnect(drive)));
-            _driveMonitor.Start();
 
             UpdateDashboard();
 
@@ -99,7 +102,27 @@ namespace Arp
 
             CheckRecoveryJournal();
 
-            if (_cfg.CheckUpdatesStartup) Updater.CheckOnStartup(Hwnd);
+            // Off the UI thread. This is a network round trip, and running it
+            // inside WM_INITDIALOG meant the window could not appear until
+            // GitHub answered - a quarter of a second on a good connection and
+            // far worse on a bad one.
+            if (_cfg.CheckUpdatesStartup)
+            {
+                var t = new Thread(() =>
+                {
+                    try
+                    {
+                        var info = Updater.CheckQuietly();
+                        if (info != null) Post(() => Updater.Offer(Hwnd, info));
+                    }
+                    catch (Exception e)
+                    {
+                        Log.Warn("Startup update check failed: " + e.Message);
+                    }
+                })
+                { IsBackground = true, Name = "UpdateCheck" };
+                t.Start();
+            }
 
             if (_cfg.AutoStart)
             {
@@ -170,6 +193,22 @@ namespace Arp
                     HandleEndSession();
                     result = (IntPtr)1;
                     return true;
+
+                // Windows tells every top-level window when a volume appears or
+                // disappears. Acting on that is instant and free, which is why
+                // the drive poll can be a slow backstop rather than a wakeup
+                // every second for as long as the app is open.
+                case Win32.WM_DEVICECHANGE:
+                {
+                    int evt = (int)wParam;
+                    if (evt is Win32.DBT_DEVICEREMOVECOMPLETE or Win32.DBT_DEVICEQUERYREMOVE
+                        or Win32.DBT_DEVICEARRIVAL or Win32.DBT_DEVNODES_CHANGED)
+                    {
+                        _driveMonitor?.CheckNow();
+                    }
+                    result = (IntPtr)1;
+                    return true;
+                }
             }
             return false;
         }
@@ -483,6 +522,7 @@ namespace Arp
                 Enable(IdSettings, false);
 
                 _rec.Start(mic1, mic2, sr, ch, bd, bufSize, prefix);
+                _driveMonitor.Start();
 
                 int splitSecs = _cfg.AutoSplitSecs;
                 if (splitSecs > 0) Win32.SetTimer(Hwnd, (UIntPtr)TimerSplit, (uint)(splitSecs * 1000), IntPtr.Zero);
@@ -610,6 +650,8 @@ namespace Arp
 
             Win32.KillTimer(Hwnd, (UIntPtr)TimerShutdown);
             _shuttingDown = false;
+            // Nothing is being written now, so stop watching the drive.
+            _driveMonitor?.Stop();
 
             if (_notifyOnStop) Speak("Recording stopped");
 

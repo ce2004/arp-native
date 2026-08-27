@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -36,7 +36,7 @@ namespace Arp
             foreach (string a in args)
             {
                 if (a != "--selftest" && a != "--uitest" && a != "--captest" && a != "--signaltest" &&
-                    a != "--speech" && a != "--config" && a != "--checkupdate" && a != "--update" &&
+                    a != "--speech" && a != "--config" && a != "--checkupdate" && a != "--update" && a != "--timing" && a != "--sounds" &&
                     a != "--devices" && a != "--version") continue;
 
                 // A WinExe has no console of its own; borrow the caller's so the
@@ -57,6 +57,8 @@ namespace Arp
                 if (a == "--signaltest") return SignalTest.Run(args);
                 if (a == "--speech") return SpeechCheck(Array.IndexOf(args, "say") >= 0);
                 if (a == "--config") return DumpConfig();
+                if (a == "--sounds") return ListSounds();
+                if (a == "--timing") return TimingTest.Run();
                 if (a == "--checkupdate") return Updater.CheckHeadless();
                 if (a == "--update") return Updater.UpdateHeadless();
                 if (a == "--devices") return ListDevices();
@@ -90,7 +92,9 @@ namespace Arp
             Win32.EnableDpiAwareness();
             Win32.InitCommonControls();
             Speech.Init();
-            Sounds.Preload();
+            // Sounds are rendered on first use, not up front. With a large
+            // library there is no reason to spend startup time building cues
+            // that may never be played.
 
             var cfg = new Config();
             var window = new MainWindow(cfg);
@@ -240,6 +244,24 @@ namespace Arp
 
             Console.WriteLine();
             Console.WriteLine("Nothing was written. This command is read-only.");
+            return 0;
+        }
+
+        /// <summary>Lists the built-in cue library with duration and peak level.</summary>
+        private static int ListSounds()
+        {
+            Console.WriteLine("{0,-22} {1,9} {2,8}", "SOUND", "DURATION", "PEAK");
+            foreach (string name in SoundLibrary.Names)
+            {
+                var s = SoundLibrary.Get(name);
+                if (s.Length == 0) { Console.WriteLine("{0,-22} {1,9} {2,8}", name, "-", "-"); continue; }
+                short peak = 0;
+                foreach (short v in s) if (Math.Abs((int)v) > Math.Abs((int)peak)) peak = v;
+                Console.WriteLine("{0,-22} {1,8:N0}ms {2,8}", name,
+                    s.Length * 1000.0 / SoundLibrary.Rate, Math.Abs((int)peak));
+            }
+            Console.WriteLine();
+            Console.WriteLine(SoundLibrary.Names.Length + " sounds.");
             return 0;
         }
 

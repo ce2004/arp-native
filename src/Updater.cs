@@ -32,7 +32,7 @@ namespace Arp
     /// </summary>
     internal static class Updater
     {
-        public const string CurrentVersion = "v2.1.0";
+        public const string CurrentVersion = "v2.2.0";
         private const string Repo = "ce2004/arp-native";
 
         /// <summary>Suffix given to the outgoing executable while it is still running.</summary>
@@ -198,18 +198,21 @@ namespace Arp
 
         // ---- entry points ----
 
-        public static void CheckOnStartup(IntPtr owner)
+        /// <summary>
+        /// Check that swallows failures, for the background startup check. The
+        /// caller runs this off the UI thread and offers the result back on it.
+        /// </summary>
+        public static UpdateInfo CheckQuietly()
         {
             try
             {
-                var info = Check();
-                if (info == null) return;
-                Offer(owner, info);
+                return Check();
             }
             catch (Exception e)
             {
-                // Never block startup because the network is unavailable.
+                // Never let an unreachable network affect startup.
                 Log.Warn("Startup update check failed: " + e.Message);
+                return null;
             }
         }
 
@@ -310,7 +313,7 @@ namespace Arp
             }
         }
 
-        private static void Offer(IntPtr owner, UpdateInfo info)
+        public static void Offer(IntPtr owner, UpdateInfo info)
         {
             var dlg = new UpdateDialog(CurrentVersion, info.Version, info.ReleaseNotes);
             if ((long)dlg.ShowModal(owner) != 1) return;

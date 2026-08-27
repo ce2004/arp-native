@@ -106,9 +106,18 @@ namespace Arp
                 int filled = 0;
                 bool discardedFirst = false;
 
-                // A poll no longer than a quarter of a block keeps the one
-                // second WASAPI ring buffer far from overrunning.
-                int sleepMs = Math.Clamp((_blockFrames * 1000) / (_sampleRate * 4), 1, 10);
+                // When the device signals us there is nothing to tune: the wait
+                // ends the moment audio is ready. The timeout only bounds how
+                // long a stop request can take to notice. Polling devices get a
+                // wait of about half a block, comfortably inside the writer's
+                // silence-substitution deadline and the one second ring buffer,
+                // while waking far less than a fixed short poll would.
+                int waitMs = stream.IsEventDriven
+                    ? 200
+                    : Math.Clamp((_blockFrames * 500) / _sampleRate, 5, 30);
+
+                Log.Info("Reader " + Number + (stream.IsEventDriven
+                    ? " is event driven." : " is polling every " + waitMs + " ms."));
 
                 while (_active && !_session.StopEvent.IsSet)
                 {
@@ -117,7 +126,7 @@ namespace Arp
 
                     if (filled < blockFloats)
                     {
-                        if (got == 0) Thread.Sleep(sleepMs);
+                        if (got == 0) stream.WaitForData(waitMs);
                         continue;
                     }
 

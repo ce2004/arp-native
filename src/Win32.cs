@@ -24,6 +24,15 @@ namespace Arp
         public const int WM_USER = 0x0400;
         public const int WM_QUERYENDSESSION = 0x0011;
         public const int WM_ENDSESSION = 0x0016;
+
+        // Windows broadcasts volume arrival and removal to every top-level
+        // window, with no registration needed. Listening costs nothing and
+        // removes the need to poll the drive at all.
+        public const int WM_DEVICECHANGE = 0x0219;
+        public const int DBT_DEVICEARRIVAL = 0x8000;
+        public const int DBT_DEVICEREMOVECOMPLETE = 0x8004;
+        public const int DBT_DEVICEQUERYREMOVE = 0x8001;
+        public const int DBT_DEVNODES_CHANGED = 0x0007;
         public const int SC_CLOSE = 0xF060;
 
         // ---- button / combo / edit / listbox ----
