@@ -79,6 +79,104 @@ Without a local C++ toolchain, the GitHub Actions workflow in
 runners already carry the MSVC toolchain including the ARM64 cross tools.
 
 
+BUILDING ON GITHUB - RUNBOOK FOR FUTURE AGENTS
+----------------------------------------------
+
+This is the normal way to produce binaries. Do not install the Visual Studio
+C++ workload locally just to get a build; the hosted runners already have it,
+including the ARM64 cross tools. A local "dotnet build" is still the right way
+to check that the code compiles and to run the tests.
+
+Repository: ce2004/arp-native  (private)
+
+STEP 0 - TOOLS
+
+Check first, because these may already be present:
+
+    git --version
+    gh --version
+
+If either is missing:
+
+    winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements
+    winget install --id GitHub.cli -e --accept-source-agreements --accept-package-agreements
+
+After installing, the current shell will not have them on PATH yet. Either
+start a new shell or refresh PATH in place:
+
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
+                [System.Environment]::GetEnvironmentVariable("Path","User")
+
+STEP 1 - AUTHENTICATION
+
+You cannot do this step yourself. It needs a browser and a one time code.
+Ask Conner to run it in the Claude Code prompt, where the leading exclamation
+mark runs it in the session so the output is visible to you:
+
+    ! gh auth login --hostname github.com --git-protocol https --web
+
+Confirm before continuing:
+
+    gh auth status
+
+Never ask for, echo, or store a personal access token. The gh credential store
+is the only place credentials should live.
+
+STEP 2 - COMMIT
+
+Commit messages become the release notes, and the application reads release
+notes aloud through the screen reader. So, per AI_UPDATE_GUIDE.txt in the
+Python repository: plain sentences, no "#" and no "*" characters anywhere.
+
+    git add -A
+    git commit -m "Fixed X. Added Y."
+    git push
+
+STEP 3 - RUN THE BUILD
+
+For a plain build with downloadable artifacts and no public release:
+
+    gh workflow run release.yml --ref main
+    gh run list --workflow release.yml --limit 1
+    gh run watch <run-id>
+
+The matrix builds win-x64 and win-arm64 in parallel and runs --selftest on the
+x64 build. The device tests need real audio endpoints and do not run in CI.
+
+STEP 4 - DOWNLOAD
+
+    gh run download <run-id> --dir dist
+
+That yields dist\win-x64\ and dist\win-arm64\, each holding the zip and its
+SHA-256 file. Verify a hash before handing anything over:
+
+    Get-FileHash "dist\win-arm64\Audio Recorder Pro-win-arm64.zip" -Algorithm SHA256
+
+STEP 5 - PUBLISH A RELEASE (only when asked)
+
+Releases are cut by pushing a version tag, never by hand.
+
+  1. Bump CurrentVersion in src\Updater.cs. It must start with a lowercase v.
+  2. Commit that bump with the release notes as the message.
+  3. Tag with exactly the same string and push the tag:
+
+        git tag v2.0.1
+        git push origin main
+        git push origin v2.0.1
+
+The release job then attaches both architecture zips plus sha256sums.txt and
+uses the commit message as the release body.
+
+TROUBLESHOOTING
+
+  - "Platform linker not found" from a local publish means the MSVC toolchain
+    is absent. That is expected on this machine. Build on GitHub instead.
+  - A run that fails only on win-arm64 is usually a genuine AOT problem, since
+    the x64 leg also executes the tests. Read the log with:
+        gh run view <run-id> --log-failed
+  - The workflow needs contents:write for the release job. It is already set.
+
+
 TESTING
 -------
 
