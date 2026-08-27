@@ -76,6 +76,7 @@ namespace Arp
                 TestSounds(cfg);
                 TestChannels(cfg);
                 TestSimpleDialogs();
+                TestListText();
             }
             catch (Exception e)
             {
@@ -152,8 +153,11 @@ namespace Arp
                     (SettingsDialog.IdPrefix, "File prefix"),
                     (SettingsDialog.IdAutoStart, "Auto-start"),
                     (SettingsDialog.IdDelay, "Start delay"),
+                    (SettingsDialog.IdDelayUnit, "Start delay unit"),
                     (SettingsDialog.IdMaxLen, "Max length"),
+                    (SettingsDialog.IdMaxLenUnit, "Max length unit"),
                     (SettingsDialog.IdSplit, "Auto-split"),
+                    (SettingsDialog.IdSplitUnit, "Auto-split unit"),
                     (SettingsDialog.IdGroupSplits, "Group splits"),
                     (SettingsDialog.IdTitle, "Window title"),
                     (SettingsDialog.IdUpdateStartup, "Update on startup"),
@@ -184,10 +188,27 @@ namespace Arp
                 Eq(Win32.GetDlgItemText(h, SettingsDialog.IdPrefix), "Interview", "prefix shown");
                 Eq(Win32.GetDlgItemText(h, SettingsDialog.IdTitle), "ARP", "window title shown");
 
-                // The spoken duration form is the whole point of these fields.
-                Eq(Win32.GetDlgItemText(h, SettingsDialog.IdSplit), "1 hour, 30 minutes", "auto-split reads as words");
-                Eq(Win32.GetDlgItemText(h, SettingsDialog.IdDelay), "1 minute, 30 seconds", "start delay reads as words");
-                Eq(Win32.GetDlgItemText(h, SettingsDialog.IdMaxLen), "0 seconds (off)", "max length reads as off");
+                // Durations split into a number and a unit, so 5400 seconds
+                // shows as "90" + "Minutes" rather than needing 5400 arrow
+                // presses or knowledge of a shorthand.
+                Eq(Win32.GetDlgItemText(h, SettingsDialog.IdSplit), "90 minutes", "auto-split shows the number");
+                Eq(Win32.ComboGetText(h, SettingsDialog.IdSplitUnit), "Minutes", "auto-split unit is Minutes");
+
+                Eq(Win32.GetDlgItemText(h, SettingsDialog.IdDelay), "90 seconds", "start delay shows the number");
+                Eq(Win32.ComboGetText(h, SettingsDialog.IdDelayUnit), "Seconds", "start delay unit is Seconds");
+
+                Eq(Win32.GetDlgItemText(h, SettingsDialog.IdMaxLen), "0 seconds", "max length shows zero");
+                Eq(Win32.ComboGetText(h, SettingsDialog.IdMaxLenUnit), "Seconds", "max length unit is Seconds");
+
+                foreach (var (id, label) in new[]
+                {
+                    (SettingsDialog.IdDelayUnit, "start delay"),
+                    (SettingsDialog.IdMaxLenUnit, "max length"),
+                    (SettingsDialog.IdSplitUnit, "auto-split"),
+                })
+                {
+                    Eq(ComboCount(h, id), 3, label + " offers Seconds, Minutes and Hours");
+                }
 
                 Eq(Win32.IsChecked(h, SettingsDialog.IdAutoStart), true, "auto-start checked from config");
                 Eq(Win32.IsChecked(h, SettingsDialog.IdGroupSplits), false, "group splits unchecked from config");
@@ -270,6 +291,55 @@ namespace Arp
             finally { Close(h); }
         }
 
+        /// <summary>
+        /// Exercises the list-of-lines helper against a real list box, since it
+        /// is what every read-only block of text in the app now goes through.
+        /// </summary>
+        private static void TestListText()
+        {
+            Say("-- Read-only text lists");
+
+            var dlg = new ConfirmDialog("probe", "seed", "ok", "no");
+            IntPtr h = Open(dlg, "ListProbe");
+            if (h == IntPtr.Zero) return;
+
+            try
+            {
+                int id = ConfirmDialog.IdText;
+
+                Win32.ListSetLines(h, id, "alpha\nbeta\ngamma");
+                Eq(Win32.ListCount(h, id), 3, "three lines become three items");
+                Eq(Win32.ListGetLine(h, id, 0), "alpha", "first item");
+                Eq(Win32.ListGetLine(h, id, 2), "gamma", "last item");
+
+                // Windows line endings must not leave stray carriage returns.
+                Win32.ListSetLines(h, id, "one\r\ntwo");
+                Eq(Win32.ListCount(h, id), 2, "CRLF splits into two items");
+                Eq(Win32.ListGetLine(h, id, 0), "one", "no trailing carriage return");
+
+                // A blank item would read as an unhelpful "blank".
+                Win32.ListSetLines(h, id, "a\n\n\nb");
+                Eq(Win32.ListCount(h, id), 2, "blank lines are dropped");
+
+                Win32.ListSetLines(h, id, "");
+                Eq(Win32.ListCount(h, id), 0, "empty text clears the list");
+
+                // Setting again must replace, not append.
+                Win32.ListSetLines(h, id, "x\ny");
+                Win32.ListSetLines(h, id, "z");
+                Eq(Win32.ListCount(h, id), 1, "a second set replaces the contents");
+                Eq(Win32.ListGetAll(h, id), "z", "contents are the newest text");
+
+                string longLine = "Output Folder is set to: " + new string('p', 200);
+                Win32.ListSetLines(h, id, longLine);
+                Eq(Win32.ListGetLine(h, id, 0), longLine, "a long path survives intact");
+            }
+            finally
+            {
+                Close(h);
+            }
+        }
+
         private static void TestSimpleDialogs()
         {
             Say("-- Repair / Update / Confirm");
@@ -283,8 +353,10 @@ namespace Arp
                     Has(h, RepairDialog.IdRepair, "Repair button");
                     Has(h, RepairDialog.IdLeave, "Leave alone button");
                     Has(h, RepairDialog.IdForget, "Forget button");
-                    Check(Win32.GetDlgItemText(h, RepairDialog.IdText).Contains("20260826_140309.wav"),
+                    Check(Win32.ListGetAll(h, RepairDialog.IdText).Contains("20260826_140309.wav"),
                         "repair prompt names the file");
+                    Check(Win32.ListCount(h, RepairDialog.IdText) >= 3,
+                        "repair prompt reads as separate lines");
                 }
                 finally { Close(h); }
             }
@@ -298,7 +370,7 @@ namespace Arp
                     Has(h, UpdateDialog.IdList, "Release notes list");
                     Has(h, UpdateDialog.IdUpdate, "Update now button");
                     Has(h, UpdateDialog.IdSkip, "Skip button");
-                    Check(Win32.GetDlgItemText(h, UpdateDialog.IdInfo).Contains("v2.0.0 to v2.1.0"),
+                    Check(Win32.ListGetAll(h, UpdateDialog.IdInfo).Contains("v2.0.0 to v2.1.0"),
                         "update prompt names both versions");
                     int count = (int)Win32.SendDlgItemMessageW(h, UpdateDialog.IdList, 0x018B, IntPtr.Zero, IntPtr.Zero);
                     Eq(count, 3, "blank lines dropped from release notes");
@@ -314,8 +386,9 @@ namespace Arp
                 {
                     Has(h, ConfirmDialog.IdAccept, "Accept button");
                     Has(h, ConfirmDialog.IdReject, "Reject button");
-                    Check(Win32.GetDlgItemText(h, ConfirmDialog.IdText).Contains("line two"),
+                    Check(Win32.ListGetAll(h, ConfirmDialog.IdText).Contains("line two"),
                         "confirm text carries both lines");
+                    Eq(Win32.ListCount(h, ConfirmDialog.IdText), 2, "confirm text is two list items");
                 }
                 finally { Close(h); }
             }

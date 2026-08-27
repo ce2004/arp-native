@@ -49,6 +49,10 @@ namespace Arp
         public const int LB_ADDSTRING = 0x0180;
         public const int LB_RESETCONTENT = 0x0184;
         public const int LB_SETCURSEL = 0x0186;
+        public const int LB_GETTEXT = 0x0189;
+        public const int LB_GETTEXTLEN = 0x018A;
+        public const int LB_GETCOUNT = 0x018B;
+        public const int LB_SETHORIZONTALEXTENT = 0x0194;
 
         public const int EM_SETSEL = 0x00B1;
         public const int EM_SETREADONLY = 0x00CF;
@@ -199,6 +203,12 @@ namespace Arp
 
         [DllImport("user32.dll")]
         public static extern IntPtr SetFocus(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetFocus();
+
+        public const int LBN_SETFOCUS = 4;
+        public const int LBN_KILLFOCUS = 5;
 
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
@@ -430,6 +440,60 @@ namespace Arp
                 }
             }
             if (count > 0) ComboSetSel(hDlg, id, 0);
+        }
+
+        // Read-only blocks of text are presented as list boxes rather than
+        // read-only edit controls. A screen reader announces a list and then
+        // reads each line as its own item on arrow-down, which is how someone
+        // actually wants to consume a status block; a read-only edit announces
+        // itself as an editable text field, which is both wrong and annoying.
+        public static void ListSetLines(IntPtr hDlg, int id, string text)
+        {
+            IntPtr h = GetDlgItem(hDlg, id);
+            if (h == IntPtr.Zero) return;
+
+            SendMessageW(h, LB_RESETCONTENT, IntPtr.Zero, IntPtr.Zero);
+            if (string.IsNullOrEmpty(text)) return;
+
+            int widest = 0;
+            foreach (string raw in text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+            {
+                // A blank entry would read as an unhelpful "blank" item.
+                string line = raw.TrimEnd();
+                if (line.Length == 0) continue;
+                SendMessageString(h, (uint)LB_ADDSTRING, IntPtr.Zero, line);
+                if (line.Length > widest) widest = line.Length;
+            }
+
+            // Roughly four dialog units per character; enough for the
+            // horizontal scrollbar to expose long paths.
+            SendMessageW(h, LB_SETHORIZONTALEXTENT, (IntPtr)(widest * 7), IntPtr.Zero);
+        }
+
+        public static int ListCount(IntPtr hDlg, int id) =>
+            (int)SendDlgItemMessageW(hDlg, id, LB_GETCOUNT, IntPtr.Zero, IntPtr.Zero);
+
+        public static string ListGetLine(IntPtr hDlg, int id, int index)
+        {
+            IntPtr h = GetDlgItem(hDlg, id);
+            if (h == IntPtr.Zero) return string.Empty;
+            int len = (int)SendMessageW(h, LB_GETTEXTLEN, (IntPtr)index, IntPtr.Zero);
+            if (len <= 0) return string.Empty;
+            var sb = new StringBuilder(len + 2);
+            SendMessageSb(h, LB_GETTEXT, (IntPtr)index, sb);
+            return sb.ToString();
+        }
+
+        public static string ListGetAll(IntPtr hDlg, int id)
+        {
+            int n = ListCount(hDlg, id);
+            var sb = new StringBuilder();
+            for (int i = 0; i < n; i++)
+            {
+                if (i > 0) sb.Append('\n');
+                sb.Append(ListGetLine(hDlg, id, i));
+            }
+            return sb.ToString();
         }
 
         public static bool IsChecked(IntPtr hDlg, int id) => IsDlgButtonChecked(hDlg, id) == BST_CHECKED;

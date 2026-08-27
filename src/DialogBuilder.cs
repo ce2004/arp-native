@@ -99,15 +99,20 @@ namespace Arp
             return this;
         }
 
-        // Read-only multiline edits stand in for the Python build's focusable
-        // labels: a Win32 STATIC cannot take focus, but a read-only EDIT can be
-        // tabbed to and arrowed through line by line, which reads better.
-        public DialogBuilder ReadOnlyText(int id, int x, int y, int cx, int cy, bool scroll = false)
+        /// <summary>
+        /// A focusable block of read-only text, presented as a list of lines.
+        ///
+        /// A Win32 STATIC cannot take focus, and a read-only EDIT announces
+        /// itself to a screen reader as an editable text field, which is both
+        /// misleading and irritating. A list box reads as a list, gives each
+        /// line its own item on arrow-down, and is what these status and
+        /// message blocks actually are.
+        /// </summary>
+        public DialogBuilder TextList(int id, int x, int y, int cx, int cy)
         {
-            uint extra = Win32.ES_MULTILINE | Win32.ES_READONLY | Win32.ES_AUTOVSCROLL;
-            if (scroll) extra |= Win32.WS_VSCROLL;
-            AddItem(Win32.ES_LEFT | Win32.WS_BORDER | Win32.WS_TABSTOP | extra,
-                Win32.WS_EX_CLIENTEDGE, x, y, cx, cy, id, Win32.ATOM_EDIT, string.Empty);
+            AddItem(Win32.LBS_NOTIFY | Win32.LBS_HASSTRINGS | Win32.LBS_NOINTEGRALHEIGHT |
+                    Win32.WS_BORDER | Win32.WS_VSCROLL | Win32.WS_HSCROLL | Win32.WS_TABSTOP,
+                Win32.WS_EX_CLIENTEDGE, x, y, cx, cy, id, Win32.ATOM_LISTBOX, string.Empty);
             return this;
         }
 

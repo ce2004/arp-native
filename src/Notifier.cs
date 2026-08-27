@@ -1,14 +1,20 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 
 namespace Arp
 {
     /// <summary>
     /// Desktop notifications via a shell tray balloon, which Windows 10 and 11
-    /// surface as a toast. This replaces plyer from the Python build; the icon
-    /// is added for the life of the notification and then removed, matching how
-    /// plyer behaves so no permanent tray icon appears.
+    /// surface as a toast. Replaces plyer from the Python build.
+    ///
+    /// The shell imposes hard limits on this structure: 63 characters of title
+    /// and 255 of body, and it silently drops whatever does not fit. On top of
+    /// that the toast itself only renders two or three lines before ellipsizing.
+    /// So text is flattened to a single line and cut on a word boundary here,
+    /// and callers keep bodies to one short sentence; the full wording still
+    /// goes to the dialog and to the screen reader, which have no such limits.
     /// </summary>
     internal static unsafe class Notifier
     {
@@ -24,6 +30,10 @@ namespace Arp
         private const uint NIIF_INFO = 0x01;
         private const uint NIIF_WARNING = 0x02;
         private const uint NIIF_ERROR = 0x03;
+
+        // Capacities of the fixed-size buffers, minus room for the terminator.
+        public const int MaxTitle = 63;
+        public const int MaxBody = 255;
 
         private static readonly IntPtr IDI_APPLICATION = 32512;
 
@@ -54,6 +64,13 @@ namespace Arp
         private static int _nextId = 1;
         private static readonly object Gate = new();
 
+        /// <summary>
+        /// The name notifications identify themselves by. Follows the window
+        /// title from settings, so renaming the window to "ARP" renames what
+        /// the notifications say too.
+        /// </summary>
+        public static string AppName { get; set; } = "Audio Recorder Pro";
+
         public static void Attach(IntPtr ownerWindow) => _owner = ownerWindow;
 
         public enum Level { Info, Warning, Error }
@@ -61,6 +78,10 @@ namespace Arp
         public static void Notify(string title, string message, Level level = Level.Info)
         {
             if (_owner == IntPtr.Zero) return;
+
+            string appName = Flatten(string.IsNullOrWhiteSpace(AppName) ? "Audio Recorder Pro" : AppName);
+            string shortTitle = Fit(Flatten(title), MaxTitle, title);
+            string shortBody = Fit(Flatten(message), MaxBody, message);
 
             uint id;
             lock (Gate) id = (uint)_nextId++;
@@ -74,7 +95,7 @@ namespace Arp
                 uCallbackMessage = (uint)(Win32.WM_APP + 100),
                 hIcon = Win32.LoadIconW(IntPtr.Zero, IDI_APPLICATION),
             };
-            Copy(data.szTip, 128, "Audio Recorder Pro");
+            Copy(data.szTip, 128, Fit(appName, 127, appName));
 
             if (!Shell_NotifyIconW(NIM_ADD, ref data))
             {
@@ -83,15 +104,17 @@ namespace Arp
             }
 
             data.uFlags = NIF_INFO;
-            Copy(data.szInfoTitle, 64, title ?? string.Empty);
-            Copy(data.szInfo, 256, message ?? string.Empty);
+            Copy(data.szInfoTitle, 64, shortTitle);
+            Copy(data.szInfo, 256, shortBody);
             data.dwInfoFlags = level switch
             {
                 Level.Warning => NIIF_WARNING,
                 Level.Error => NIIF_ERROR,
                 _ => NIIF_INFO,
             };
-            Shell_NotifyIconW(NIM_MODIFY, ref data);
+
+            if (!Shell_NotifyIconW(NIM_MODIFY, ref data))
+                Log.Warn("Shell_NotifyIcon(NIM_MODIFY) failed for notification: " + title);
 
             // Windows keeps the toast alive once shown; the icon only needs to
             // survive long enough for the shell to pick it up.
@@ -109,6 +132,51 @@ namespace Arp
             })
             { IsBackground = true, Name = "NotifyReaper" };
             t.Start();
+        }
+
+        /// <summary>
+        /// Collapses newlines and runs of whitespace into single spaces. A
+        /// balloon renders as one paragraph, so embedded line breaks turn into
+        /// stray gaps and waste the character budget.
+        /// </summary>
+        internal static string Flatten(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+            var sb = new StringBuilder(s.Length);
+            bool lastWasSpace = false;
+            foreach (char c in s)
+            {
+                bool isSpace = c == ' ' || c == '\t' || c == '\r' || c == '\n';
+                if (isSpace)
+                {
+                    if (!lastWasSpace && sb.Length > 0) sb.Append(' ');
+                    lastWasSpace = true;
+                }
+                else
+                {
+                    sb.Append(c);
+                    lastWasSpace = false;
+                }
+            }
+            return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// Trims to fit, breaking on a word boundary and marking the cut so a
+        /// truncated notification does not read as a complete sentence.
+        /// </summary>
+        internal static string Fit(string s, int max, string original = null)
+        {
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+            if (s.Length <= max) return s;
+
+            int cut = s.LastIndexOf(' ', Math.Min(max - 1, s.Length - 1));
+            if (cut < max / 2) cut = max - 1; // no sensible break; hard cut
+            string result = s.Substring(0, cut).TrimEnd(' ', ',', ';', ':', '.') + "…";
+
+            Log.Warn("Notification text truncated to " + max + " characters. Full text: " +
+                     Flatten(original ?? s));
+            return result;
         }
 
         private static void Copy(char* dest, int capacity, string s)

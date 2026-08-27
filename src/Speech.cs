@@ -5,9 +5,13 @@ using System.Runtime.InteropServices;
 namespace Arp
 {
     /// <summary>
-    /// Screen-reader output, standing in for accessible_output2's Auto backend.
-    /// Prefers the NVDA controller client and falls back to SAPI so unattended
-    /// status announcements still happen if NVDA is not running.
+    /// Screen-reader output through the NVDA controller client.
+    ///
+    /// NVDA only, by design. There is no SAPI fallback: a synthesiser talking
+    /// over the top of NVDA is worse than silence, and every status message
+    /// here is also written to the dashboard, which NVDA reads from the control
+    /// itself. If the controller client is missing, announcements are logged
+    /// and dropped rather than spoken by something else.
     /// </summary>
     internal static unsafe class Speech
     {
@@ -16,9 +20,6 @@ namespace Arp
         private static delegate* unmanaged[Stdcall]<char*, int> _speakText;
         private static delegate* unmanaged[Stdcall]<int> _testIfRunning;
         private static delegate* unmanaged[Stdcall]<int> _cancelSpeech;
-
-        private static IntPtr _sapiVoice;
-        private static bool _sapiTried;
 
         public static bool HasNvda => _speakText != null;
 
@@ -35,10 +36,8 @@ namespace Arp
 
         public static string Describe()
         {
-            if (_speakText != null) return "NVDA controller client";
-            EnsureSapi();
-            if (_sapiVoice != IntPtr.Zero) return "SAPI (NVDA client not available)";
-            return "none";
+            if (_speakText == null) return "none (NVDA controller client not found)";
+            return NvdaRunning() ? "NVDA controller client (NVDA running)" : "NVDA controller client (NVDA not running)";
         }
 
         private static void LoadNvda()
@@ -46,8 +45,7 @@ namespace Arp
             // The controller client must match the *calling process*
             // architecture, not NVDA's. An ARM64 build therefore needs
             // nvdaControllerClientArm64.dll next to the exe; an x64 build needs
-            // nvdaControllerClient64.dll. Probe by architecture, then fall back
-            // to any of the usual names in case only one was shipped.
+            // nvdaControllerClient64.dll.
             string arch = RuntimeInformation.ProcessArchitecture switch
             {
                 Architecture.Arm64 => "Arm64",
@@ -91,7 +89,9 @@ namespace Arp
                     try { NativeLibrary.Free(lib); } catch { }
                 }
             }
-            Log.Info("No NVDA controller client found for " + arch + "; will use SAPI if available.");
+            Log.Warn("No NVDA controller client found for " + arch +
+                     "; spoken announcements are disabled. Place nvdaControllerClient" + arch +
+                     ".dll next to the executable to enable them.");
         }
 
         public static bool NvdaRunning()
@@ -103,7 +103,6 @@ namespace Arp
 
         public static void Speak(string message)
         {
-            if (string.IsNullOrEmpty(message)) return;
             var gate = ShouldSpeak;
             if (gate != null && !gate()) return;
             SpeakRaw(message);
@@ -113,23 +112,20 @@ namespace Arp
         public static void SpeakRaw(string message)
         {
             if (string.IsNullOrEmpty(message)) return;
+            if (_speakText == null) return;
+
             try
             {
-                if (_speakText != null && NvdaRunning())
+                if (!NvdaRunning()) return;
+                fixed (char* p = message)
                 {
-                    fixed (char* p = message)
-                    {
-                        if (_speakText(p) == 0) return;
-                    }
+                    if (_speakText(p) != 0) Log.Warn("NVDA rejected an announcement.");
                 }
             }
             catch (Exception e)
             {
                 Log.Warn("NVDA speak failed: " + e.Message);
             }
-
-            try { SapiSpeak(message); }
-            catch (Exception e) { Log.Warn("SAPI speak failed: " + e.Message); }
         }
 
         public static void Cancel()
@@ -140,44 +136,6 @@ namespace Arp
             }
             catch
             {
-            }
-        }
-
-        // ---- SAPI fallback, reached through vtable slots for NativeAOT ----
-        private static readonly Guid CLSID_SpVoice = new("96749377-3391-11D2-9EE3-00C04F797396");
-        private static readonly Guid IID_ISpVoice = new("6C44DF74-72B9-4992-A1EC-EF996E0422D4");
-        private const int SPF_ASYNC = 1;
-        private const int ISpVoice_Speak = 20;
-
-        [DllImport("ole32.dll")]
-        private static extern int CoCreateInstance(in Guid clsid, IntPtr outer, int ctx, in Guid iid, out IntPtr obj);
-
-        private static void EnsureSapi()
-        {
-            if (_sapiTried) return;
-            _sapiTried = true;
-            try
-            {
-                int hr = CoCreateInstance(CLSID_SpVoice, IntPtr.Zero, 23, IID_ISpVoice, out IntPtr voice);
-                if (hr >= 0) _sapiVoice = voice;
-                else Log.Info("SAPI unavailable (0x" + hr.ToString("X8") + ")");
-            }
-            catch (Exception e)
-            {
-                Log.Info("SAPI unavailable: " + e.Message);
-            }
-        }
-
-        private static void SapiSpeak(string message)
-        {
-            EnsureSapi();
-            if (_sapiVoice == IntPtr.Zero) return;
-            void** vt = *(void***)_sapiVoice;
-            fixed (char* p = message)
-            {
-                uint stream;
-                ((delegate* unmanaged[Stdcall]<IntPtr, char*, int, uint*, int>)vt[ISpVoice_Speak])(
-                    _sapiVoice, p, SPF_ASYNC, &stream);
             }
         }
     }

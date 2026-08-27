@@ -29,7 +29,7 @@ namespace Arp
         protected override byte[] BuildTemplate()
         {
             var b = new DialogBuilder(_title, 300, 132);
-            b.ReadOnlyText(IdText, 8, 8, 284, 90, true);
+            b.TextList(IdText, 8, 8, 284, 90);
             b.DefButton(IdAccept, _acceptText, 8, 106, 110, 16);
             b.Button(IdReject, _rejectText, 126, 106, 90, 16);
             return b.Build();
@@ -37,7 +37,7 @@ namespace Arp
 
         protected override void OnInit()
         {
-            Text(IdText, _message.Replace("\n", "\r\n"));
+            Win32.ListSetLines(Hwnd, IdText, _message);
             Focus(IdAccept);
         }
 
@@ -77,6 +77,9 @@ namespace Arp
         internal const int IdSounds = 2020;
         internal const int IdChannelsCfg = 2021;
         internal const int IdCopyLogs = 2022;
+        internal const int IdDelayUnit = 2023;
+        internal const int IdMaxLenUnit = 2024;
+        internal const int IdSplitUnit = 2025;
 
         private readonly Config _cfg;
         private readonly List<AudioDevice> _devices;
@@ -84,7 +87,7 @@ namespace Arp
         // Combo item data is an index into this list; -1 means "None".
         private readonly List<string> _deviceIds = new();
 
-        private SpinEdit _delay, _maxLen, _split;
+        private DurationField _delay, _maxLen, _split;
 
         public SettingsDialog(Config cfg, List<AudioDevice> devices)
         {
@@ -124,12 +127,17 @@ namespace Arp
             b.Label("File &Prefix:", 10, 193, 84, 9);
             b.Edit(IdPrefix, 98, 190, 230, 13);
             b.CheckBox(IdAutoStart, "Auto-st&art recording on launch", 10, 206, 318, 13);
+            // Each duration is a number plus a unit combo, so a two hour split
+            // is "2" and "Hours" rather than a very long press of the up arrow.
             b.Label("Start De&lay:", 10, 225, 104, 9);
-            b.Edit(IdDelay, 118, 222, 110, 13);
+            b.Edit(IdDelay, 118, 222, 46, 13);
+            b.Combo(IdDelayUnit, 168, 222, 78, 90);
             b.Label("Max Recording Length (0=off):", 10, 239, 104, 9);
-            b.Edit(IdMaxLen, 118, 236, 110, 13);
+            b.Edit(IdMaxLen, 118, 236, 46, 13);
+            b.Combo(IdMaxLenUnit, 168, 236, 78, 90);
             b.Label("Time Auto-S&plit every:", 10, 253, 104, 9);
-            b.Edit(IdSplit, 118, 250, 110, 13);
+            b.Edit(IdSplit, 118, 250, 46, 13);
+            b.Combo(IdSplitUnit, 168, 250, 78, 90);
             b.CheckBox(IdGroupSplits, "Automatically place all splits into a unified folder", 10, 264, 318, 13);
 
             b.GroupBox("Appearance && Extra Options", 4, 282, 332, 96);
@@ -177,13 +185,13 @@ namespace Arp
 
             // Same ranges as the Python spin boxes, including the max-length cap
             // that keeps the timer inside a 32-bit millisecond count.
-            _delay = new SpinEdit(Hwnd, IdDelay, 0, 3600, 1, TimeText.Format, TimeText.Parse);
-            _maxLen = new SpinEdit(Hwnd, IdMaxLen, 0, 2000000, 1, TimeText.Format, TimeText.Parse);
-            _split = new SpinEdit(Hwnd, IdSplit, 0, 3600 * 24, 1, TimeText.Format, TimeText.Parse);
+            _delay = new DurationField(Hwnd, IdDelay, IdDelayUnit, 3600);
+            _maxLen = new DurationField(Hwnd, IdMaxLen, IdMaxLenUnit, 2000000);
+            _split = new DurationField(Hwnd, IdSplit, IdSplitUnit, 3600 * 24);
 
-            _delay.Value = _cfg.AutoStartDelay;
-            _maxLen.Value = _cfg.MaxLengthSecs;
-            _split.Value = _cfg.AutoSplitSecs;
+            _delay.TotalSeconds = _cfg.AutoStartDelay;
+            _maxLen.TotalSeconds = _cfg.MaxLengthSecs;
+            _split.TotalSeconds = _cfg.AutoSplitSecs;
         }
 
         private void PopulateDevices()
@@ -250,6 +258,12 @@ namespace Arp
 
         protected override bool OnCommand(int id, int code)
         {
+            // A unit change re-labels and re-clamps its own number field.
+            if (_delay != null && (_delay.HandleCommand(id, code) ||
+                                   _maxLen.HandleCommand(id, code) ||
+                                   _split.HandleCommand(id, code)))
+                return true;
+
             switch (id)
             {
                 case IdChangeFolder:
@@ -350,9 +364,9 @@ namespace Arp
             _cfg.Device2Id = d2;
 
             _cfg.AutoStart = Checked(IdAutoStart);
-            _cfg.AutoStartDelay = _delay.Value;
-            _cfg.AutoSplitSecs = _split.Value;
-            _cfg.MaxLengthSecs = _maxLen.Value;
+            _cfg.AutoStartDelay = _delay.TotalSeconds;
+            _cfg.AutoSplitSecs = _split.TotalSeconds;
+            _cfg.MaxLengthSecs = _maxLen.TotalSeconds;
             _cfg.GroupSplits = Checked(IdGroupSplits);
 
             _cfg.SampleRate = Win32.ComboGetText(Hwnd, IdSampleRate);

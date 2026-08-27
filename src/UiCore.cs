@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Runtime.InteropServices;
 
 namespace Arp
@@ -113,16 +114,21 @@ namespace Arp
         private readonly Win32.WndProc _proc; // must outlive the control
         private readonly Func<int, string> _format;
         private readonly Func<string, int> _parse;
-        private readonly int _min, _max, _step;
+        private readonly int _min, _step;
 
         private static readonly List<SpinEdit> Alive = new(); // pins instances
+
+        /// <summary>Upper bound, which moves when a duration field changes unit.</summary>
+        public int Max { get; set; }
+
+        private int _max => Max;
 
         public SpinEdit(IntPtr dlg, int controlId, int min, int max, int step,
             Func<int, string> format, Func<string, int> parse)
         {
             _hwnd = Win32.GetDlgItem(dlg, controlId);
             _min = min;
-            _max = max;
+            Max = max;
             _step = step;
             _format = format;
             _parse = parse;
@@ -188,6 +194,127 @@ namespace Arp
 
             return Win32.CallWindowProc(_oldProc, hWnd, msg, wParam, lParam);
         }
+    }
+
+    /// <summary>
+    /// A duration entered as a plain number plus a unit chosen from a combo box
+    /// (Seconds, Minutes, Hours).
+    ///
+    /// The Python build used a single field holding the whole duration in
+    /// seconds, so setting a two hour split meant arrowing 7200 times or
+    /// knowing the shorthand. Splitting the unit out means typing "2" and
+    /// picking "Hours". Arrow keys still nudge the number.
+    /// </summary>
+    internal sealed class DurationField
+    {
+        internal static readonly string[] UnitNames = { "Seconds", "Minutes", "Hours" };
+        private static readonly int[] UnitSeconds = { 1, 60, 3600 };
+
+        private readonly IntPtr _dlg;
+        private readonly int _editId;
+        private readonly int _comboId;
+        private readonly int _maxSeconds;
+        private readonly SpinEdit _spin;
+
+        public DurationField(IntPtr dlg, int editId, int comboId, int maxSeconds)
+        {
+            _dlg = dlg;
+            _editId = editId;
+            _comboId = comboId;
+            _maxSeconds = maxSeconds;
+
+            foreach (string u in UnitNames) Win32.ComboAdd(dlg, comboId, u, 0);
+            Win32.ComboSetSel(dlg, comboId, 0);
+
+            _spin = new SpinEdit(dlg, editId, 0, maxSeconds, 1,
+                n => n.ToString(CultureInfo.InvariantCulture) + " " + CurrentUnitName(n),
+                ParseNumber);
+        }
+
+        private int UnitIndex
+        {
+            get
+            {
+                int i = Win32.ComboGetSel(_dlg, _comboId);
+                return i < 0 || i >= UnitSeconds.Length ? 0 : i;
+            }
+        }
+
+        private int Multiplier => UnitSeconds[UnitIndex];
+
+        /// <summary>Singularised unit name, so a screen reader says "1 minute".</summary>
+        private string CurrentUnitName(int quantity)
+        {
+            string name = UnitNames[UnitIndex];
+            return quantity == 1 ? name.Substring(0, name.Length - 1).ToLowerInvariant() : name.ToLowerInvariant();
+        }
+
+        private static int ParseNumber(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return 0;
+            int i = 0;
+            while (i < text.Length && !char.IsAsciiDigit(text[i])) i++;
+            int start = i;
+            while (i < text.Length && char.IsAsciiDigit(text[i])) i++;
+            if (i == start) return 0;
+            return long.TryParse(text.AsSpan(start, i - start), NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out long v)
+                ? (v > int.MaxValue ? int.MaxValue : (int)v)
+                : 0;
+        }
+
+        /// <summary>
+        /// Picks the largest unit that divides the duration exactly, so 5400
+        /// reads back as 90 minutes rather than 5400 seconds, and 7200 as
+        /// 2 hours.
+        /// </summary>
+        internal static (int Quantity, int UnitIndex) Decompose(int totalSeconds)
+        {
+            if (totalSeconds <= 0) return (0, 0);
+            if (totalSeconds % 3600 == 0) return (totalSeconds / 3600, 2);
+            if (totalSeconds % 60 == 0) return (totalSeconds / 60, 1);
+            return (totalSeconds, 0);
+        }
+
+        public int TotalSeconds
+        {
+            get
+            {
+                long total = (long)ParseNumber(GetEditText()) * Multiplier;
+                if (total < 0) return 0;
+                return total > _maxSeconds ? _maxSeconds : (int)total;
+            }
+            set
+            {
+                var (quantity, unit) = Decompose(Math.Clamp(value, 0, _maxSeconds));
+                Win32.ComboSetSel(_dlg, _comboId, unit);
+                UpdateMax();
+                Win32.SetDlgItemTextW(_dlg, _editId,
+                    quantity.ToString(CultureInfo.InvariantCulture) + " " + CurrentUnitName(quantity));
+            }
+        }
+
+        private string GetEditText() => Win32.GetDlgItemText(_dlg, _editId);
+
+        private void UpdateMax() => _spin.Max = Math.Max(1, _maxSeconds / Multiplier);
+
+        /// <summary>
+        /// Re-labels the number when the unit changes and clamps it to the new
+        /// ceiling. Returns true when the command belonged to this field.
+        /// </summary>
+        public bool HandleCommand(int id, int code)
+        {
+            if (id != _comboId || code != Win32.CBN_SELCHANGE) return false;
+
+            UpdateMax();
+            int quantity = Math.Clamp(ParseNumber(GetEditText()), 0, _spin.Max);
+            string text = quantity.ToString(CultureInfo.InvariantCulture) + " " + CurrentUnitName(quantity);
+            Win32.SetDlgItemTextW(_dlg, _editId, text);
+            return true;
+        }
+
+        /// <summary>Rewrites the field as the canonical "&lt;n&gt; &lt;unit&gt;" form.</summary>
+        public void Normalize() => TotalSeconds = TotalSeconds;
     }
 
     internal static class FolderPicker

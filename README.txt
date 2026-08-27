@@ -229,8 +229,11 @@ non-zero on failure.
 SCREEN READER OUTPUT
 --------------------
 
-Speech goes to the NVDA controller client when it is available and falls back
-to SAPI otherwise, standing in for accessible_output2's Auto backend.
+NVDA only. Announcements go through the NVDA controller client and there is no
+SAPI fallback: a second synthesiser talking over the top of NVDA is worse than
+silence. If the controller client is missing, announcements are written to the
+log and dropped, and NVDA still reads the whole interface normally because
+every control is a real Win32 control.
 
 The controller client must match the architecture of THIS process, not NVDA's.
 Place the matching DLL in native\<rid>\ and the build copies it next to the
@@ -239,14 +242,41 @@ executable:
   native\win-x64\nvdaControllerClient64.dll      (present)
   native\win-arm64\nvdaControllerClientArm64.dll (needed for ARM64 speech)
 
-The ARM64 client ships in NVDA's controllerClient package. Without it, an ARM64
-build still runs and NVDA still reads the interface normally, because every
-control is a real Win32 control; only the app's own spoken status announcements
-fall back to SAPI.
+The ARM64 client ships in NVDA's controllerClient package. Until it is dropped
+in, the ARM64 build runs fine but makes no spoken status announcements of its
+own.
 
-Duration and volume fields display and accept spoken text ("1 hour, 30 minutes",
-"15 percent") rather than bare numbers, and Up, Down, Home and End adjust them,
-speaking the new value.
+READ-ONLY TEXT
+
+Blocks of read-only text - the dashboard overview, the live statistics, and the
+message in each prompt - are list boxes, not read-only edit controls. A
+read-only edit announces itself as an editable text field, which is misleading;
+a list reads as a list and gives each line its own item on arrow-down.
+
+The live statistics are rewritten once a second. An update that arrives while
+that list has focus is held back and applied when focus leaves, so the control
+never re-announces or loses the reading position underneath you.
+
+DURATIONS
+
+Start delay, maximum length and auto-split are each a number plus a unit combo
+box (Seconds, Minutes, Hours). A two hour split is "2" and "Hours" rather than
+a very long press of the up arrow. Up, Down, Home and End still nudge the
+number and speak the result. When a setting is loaded the largest unit that
+divides it exactly is chosen, so 5400 seconds reads back as 90 minutes and
+7200 as 2 hours.
+
+NOTIFICATIONS
+
+Notification titles follow the window title from settings, so renaming the
+window to "ARP" renames what the notifications identify themselves as.
+
+Bodies are deliberately one short sentence. The shell caps a balloon at 63
+characters of title and 255 of body and clips the toast after two or three
+lines regardless, so the full wording goes to the dialog and to the screen
+reader instead, neither of which has that limit. If a notification ever does
+have to be trimmed it breaks on a word boundary, ends with an ellipsis, and the
+untruncated text is written to the log.
 
 
 LAYOUT

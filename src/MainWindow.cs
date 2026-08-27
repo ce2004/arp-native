@@ -59,8 +59,8 @@ namespace Arp
             b.Button(IdSettings, "Se&ttings", 71, 20, 62, 18);
             b.Button(IdRecord, "&Start Recording", 137, 20, 62, 18);
             b.Button(IdPause, "&Pause", 203, 20, 62, 18);
-            b.ReadOnlyText(IdOverview, 5, 44, 260, 58, true);
-            b.ReadOnlyText(IdStats, 5, 108, 260, 24, true);
+            b.TextList(IdOverview, 5, 44, 260, 58);
+            b.TextList(IdStats, 5, 108, 260, 24);
             return b.Build();
         }
 
@@ -69,6 +69,7 @@ namespace Arp
         protected override void OnInit()
         {
             Notifier.Attach(Hwnd);
+            Notifier.AppName = _cfg.WindowTitle; // notifications follow the window title
             Speech.ShouldSpeak = () => !_cfg.SpeakInFocusOnly || IsForeground();
 
             PopulateDevices();
@@ -194,6 +195,14 @@ namespace Arp
 
         protected override bool OnCommand(int id, int code)
         {
+            // Leaving one of the status lists is the moment it is safe to apply
+            // an update that arrived while it was being read.
+            if (code == Win32.LBN_KILLFOCUS && (id == IdOverview || id == IdStats))
+            {
+                FlushList(id);
+                return true;
+            }
+
             switch (id)
             {
                 case IdExit:
@@ -217,20 +226,75 @@ namespace Arp
 
             int split = _cfg.AutoSplitSecs;
             string overview =
-                "Recording Device is set to: " + micName + "\r\n" +
-                "Output Folder is set to: " + _cfg.SaveFolder + "\r\n" +
-                "Auto-Recording is: " + (_cfg.AutoStart ? "On" : "Off") + "\r\n" +
-                "Auto-Split is: " + (split > 0 ? split + " seconds" : "Off") + "\r\n\r\n" +
+                "Recording Device is set to: " + micName + "\n" +
+                "Output Folder is set to: " + _cfg.SaveFolder + "\n" +
+                "Auto-Recording is: " + (_cfg.AutoStart ? "On" : "Off") + "\n" +
+                "Auto-Split is: " + (split > 0 ? TimeText.Format(split) : "Off") + "\n" +
                 _statusMsg;
 
-            Text(IdOverview, overview);
+            SetList(IdOverview, overview);
         }
 
         private void ShowStats(bool visible)
         {
             _statsVisible = visible;
-            Win32.ShowWindow(Win32.GetDlgItem(Hwnd, IdStats), visible ? Win32.SW_SHOW : 0);
+            IntPtr h = Win32.GetDlgItem(Hwnd, IdStats);
+            if (h == IntPtr.Zero) return;
+
+            // Hiding the control that currently has focus would leave focus
+            // nowhere and the screen reader silent, so hand it to the record
+            // button first.
+            if (!visible && Win32.GetFocus() == h)
+                Win32.SetFocus(Win32.GetDlgItem(Hwnd, IdRecord));
+
+            Win32.ShowWindow(h, visible ? Win32.SW_SHOW : 0);
         }
+
+        private readonly Dictionary<int, string> _listShown = new();
+        private readonly Dictionary<int, string> _listPending = new();
+
+        /// <summary>
+        /// Updates one of the read-only lists, but never while it has keyboard
+        /// focus.
+        ///
+        /// The live stats are rewritten once a second. Rebuilding a list box
+        /// under a screen reader that is sitting in it makes it re-announce and
+        /// loses the reading position, so an update that arrives while the user
+        /// is in the control is held back and applied when focus leaves. The
+        /// value is also skipped entirely when nothing actually changed.
+        /// </summary>
+        private void SetList(int id, string text)
+        {
+            if (_listShown.TryGetValue(id, out string current) && current == text)
+            {
+                _listPending.Remove(id);
+                return;
+            }
+
+            IntPtr h = Win32.GetDlgItem(Hwnd, id);
+            if (h != IntPtr.Zero && Win32.GetFocus() == h)
+            {
+                _listPending[id] = text;
+                return;
+            }
+
+            _listPending.Remove(id);
+            _listShown[id] = text;
+            Win32.ListSetLines(Hwnd, id, text);
+        }
+
+        /// <summary>Applies an update that was deferred while the list was focused.</summary>
+        private void FlushList(int id)
+        {
+            if (!_listPending.TryGetValue(id, out string text)) return;
+            _listPending.Remove(id);
+            _listShown[id] = text;
+            Win32.ListSetLines(Hwnd, id, text);
+        }
+
+        private void SetStats(string text) => SetList(IdStats, text);
+
+        private string StatsText() => Win32.ListGetAll(Hwnd, IdStats);
 
         private void UpdateLiveStats()
         {
@@ -262,7 +326,7 @@ namespace Arp
                 {
                     text = timeStr + mb.ToString("F2", CultureInfo.InvariantCulture) + " MB Storage used.";
                 }
-                Text(IdStats, text);
+                SetStats(text);
             }
             catch
             {
@@ -276,6 +340,12 @@ namespace Arp
 
         private void Speak(string msg) => Speech.Speak(msg);
 
+        /// <summary>
+        /// Notification bodies are kept to one short sentence on purpose. The
+        /// shell clips a toast after two or three lines, so anything longer
+        /// gets cut off mid-thought; the full wording goes to the dialog and to
+        /// the screen reader instead, neither of which has that limit.
+        /// </summary>
         private void Notify(string title, string msg, string settingKey, Notifier.Level level = Notifier.Level.Info)
         {
             if (!_cfg.NotifyEnabled(settingKey)) return;
@@ -297,6 +367,7 @@ namespace Arp
             if ((long)dlg.ShowModal(Hwnd) == 1)
             {
                 Win32.SetWindowTextW(Hwnd, _cfg.WindowTitle);
+                Notifier.AppName = _cfg.WindowTitle; // notifications follow the window title
                 UpdateDashboard();
             }
         }
@@ -424,7 +495,7 @@ namespace Arp
 
                 Win32.SetTimer(Hwnd, (UIntPtr)TimerDisk, 5000, IntPtr.Zero);
 
-                Text(IdStats, splitSecs > 0
+                SetStats(splitSecs > 0
                     ? "Recording time, 0 seconds. 0.00 MB Storage used on current split."
                     : "Recording time, 0 seconds. 0.00 MB Storage used.");
                 ShowStats(true);
@@ -492,8 +563,7 @@ namespace Arp
         {
             if (!_isRecording) return;
             StopRecording(false);
-            Notify("Max Length Reached",
-                "The recording automatically stopped because it reached the maximum length.", "notify_start_stop");
+            Notify("Max Length Reached", "Stopped: maximum recording length reached.", "notify_start_stop");
         }
 
         private void StopRecording(bool notify = true)
@@ -564,32 +634,36 @@ namespace Arp
                 int dropped = session.DroppedBlocks;
                 int silence = session.SilenceBlocks;
                 string msg;
+                var level = Notifier.Level.Info;
 
                 switch (session.Finalization)
                 {
                     case FinalizationStatus.FinalizationFailed:
-                        msg = "WARNING: File finalization failed! The recording may be incomplete or corrupt.";
+                        msg = "File finalization failed. The recording may be incomplete.";
+                        level = Notifier.Level.Error;
                         Speak("Warning. File finalization failed.");
                         break;
                     case FinalizationStatus.ClosedWithWarnings:
-                        msg = "File saved with warnings. Please verify the recording.";
+                        msg = "Saved with warnings. Please verify the recording.";
+                        level = Notifier.Level.Warning;
                         Speak("Recording saved with verification warnings.");
                         break;
                     default:
-                        msg = "File safely saved to disk!";
                         if (dropped > 0 || silence > 0)
                         {
-                            msg += "\n\nQuality Warning: " + dropped + " blocks dropped, " +
-                                   silence + " silence blocks substituted.";
+                            msg = "Saved, but " + dropped + " blocks dropped and " +
+                                  silence + " silence blocks substituted.";
+                            level = Notifier.Level.Warning;
                             Speak("Recording saved with quality warnings.");
                         }
                         else
                         {
+                            msg = "File safely saved to disk.";
                             Speak("Recording saved successfully.");
                         }
                         break;
                 }
-                Notify("Recording Saved", msg, "notify_start_stop");
+                Notify("Recording Saved", msg, "notify_start_stop", level);
             }
 
             if (_pendingClose)
@@ -623,10 +697,11 @@ namespace Arp
 
                 if (_cfg.NotifyDriveDisconnect)
                 {
-                    string msg = "The drive " + drive + " was disconnected.";
-                    if (wasRecording)
-                        msg += " Recording is stopping. File integrity has not yet been confirmed.";
-                    Notify("Drive Disconnected", msg, "notify_drive_disconnect", Notifier.Level.Error);
+                    Notify("Drive Disconnected",
+                        wasRecording
+                            ? "Drive " + drive + " disconnected. Recording stopped."
+                            : "Drive " + drive + " disconnected.",
+                        "notify_drive_disconnect", Notifier.Level.Error);
                 }
 
                 if (wasRecording && _cfg.AutoResumeUnattended)
@@ -661,14 +736,18 @@ namespace Arp
             {
                 msg += "\r\n\r\nHowever, because 'Continue recording' is enabled, the recording will continue " +
                        "using the remaining input.";
-                Notify("Microphone Disconnected", msg, "notify_mic_disconnect", Notifier.Level.Warning);
+                Notify("Microphone Disconnected",
+                    "Microphone " + micNum + " disconnected. Continuing on the remaining input.",
+                    "notify_mic_disconnect", Notifier.Level.Warning);
                 Critical(msg, "Microphone Disconnected");
                 return;
             }
 
             msg += "\r\n\r\nRecording is stopping. File integrity has not yet been confirmed.";
             StopRecording();
-            Notify("Microphone Disconnected", msg, "notify_mic_disconnect", Notifier.Level.Error);
+            Notify("Microphone Disconnected",
+                "Microphone " + micNum + " disconnected. Recording stopped.",
+                "notify_mic_disconnect", Notifier.Level.Error);
 
             if (_cfg.AutoResumeUnattended)
             {
@@ -851,7 +930,7 @@ namespace Arp
 
             if (_isRecording && _cfg.ConfirmExit)
             {
-                string stats = _statsVisible ? Text(IdStats) : "Recording in progress.";
+                string stats = _statsVisible ? StatsText() : "Recording in progress.";
                 bool leave = AskYesNo(
                     "You are currently recording.\r\n\r\n" + stats + "\r\n\r\n" +
                     "Are you sure you'd like to exit? If you do, your recording will be saved, " +

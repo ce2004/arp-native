@@ -46,6 +46,8 @@ namespace Arp
                 TestTimeText();
                 TestPercentAndNaming();
                 TestRouting();
+                TestDurationUnits();
+                TestNotificationText();
                 TestRf64(tmp);
                 TestRepair(tmp);
                 TestSounds();
@@ -247,6 +249,87 @@ namespace Arp
 
             Recorder.ApplyRouting(src, 2, "Both Channels", 2, 0.5f, dst);
             Eq(dst[0], 0.4f, "gain applied");
+        }
+
+        private static void TestDurationUnits()
+        {
+            Section("Duration units");
+
+            // The decomposition picks the largest unit that divides exactly, so
+            // a two hour split reads as "2 Hours" rather than "7200 Seconds".
+            Eq(DurationField.Decompose(0), (0, 0), "zero is 0 seconds");
+            Eq(DurationField.Decompose(45), (45, 0), "45 stays in seconds");
+            Eq(DurationField.Decompose(60), (1, 1), "60 becomes 1 minute");
+            Eq(DurationField.Decompose(90), (90, 0), "90 stays in seconds, not 1.5 minutes");
+            Eq(DurationField.Decompose(300), (5, 1), "300 becomes 5 minutes");
+            Eq(DurationField.Decompose(3600), (1, 2), "3600 becomes 1 hour");
+            Eq(DurationField.Decompose(5400), (90, 1), "5400 becomes 90 minutes, not 1.5 hours");
+            Eq(DurationField.Decompose(7200), (2, 2), "7200 becomes 2 hours");
+            Eq(DurationField.Decompose(86400), (24, 2), "a full day becomes 24 hours");
+            Eq(DurationField.Decompose(3661), (3661, 0), "an awkward value stays in seconds");
+            Eq(DurationField.Decompose(-5), (0, 0), "a negative duration clamps to zero");
+
+            // Every decomposition must multiply back to the original value,
+            // otherwise a saved duration would drift each time it is reopened.
+            int[] units = { 1, 60, 3600 };
+            foreach (int v in new[] { 0, 1, 30, 59, 60, 61, 120, 299, 300, 3599, 3600, 5400, 7200, 86400, 2000000 })
+            {
+                var (q, u) = DurationField.Decompose(v);
+                Eq(q * units[u], v, "round-trip " + v + " seconds");
+            }
+
+            Eq(DurationField.UnitNames.Length, 3, "three unit choices");
+            Eq(DurationField.UnitNames[0], "Seconds", "first unit is Seconds");
+            Eq(DurationField.UnitNames[2], "Hours", "last unit is Hours");
+        }
+
+        private static void TestNotificationText()
+        {
+            Section("Notification text");
+
+            Eq(Notifier.Flatten("one\r\ntwo\nthree"), "one two three", "newlines collapse to spaces");
+            Eq(Notifier.Flatten("a    b"), "a b", "runs of spaces collapse");
+            Eq(Notifier.Flatten("  padded  "), "padded", "surrounding whitespace trimmed");
+            Eq(Notifier.Flatten(""), "", "empty stays empty");
+
+            Eq(Notifier.Fit("short", 50), "short", "text within the limit is untouched");
+
+            string longText = new string('a', 40) + " " + new string('b', 40);
+            string fitted = Notifier.Fit(longText, 50);
+            Check(fitted.Length <= 50, "truncated text respects the limit (" + fitted.Length + ")");
+            Check(fitted.EndsWith("…", StringComparison.Ordinal), "truncation is marked with an ellipsis");
+            Check(!fitted.Contains("bbbb", StringComparison.Ordinal), "truncation broke on the word boundary");
+
+            // A single unbroken run has no word boundary to use.
+            string unbroken = new string('x', 100);
+            string hard = Notifier.Fit(unbroken, 20);
+            Check(hard.Length <= 20, "unbreakable text is hard-cut to the limit");
+
+            // The real messages must fit the shell's buffers without cutting.
+            var messages = new[]
+            {
+                "Recording has begun.",
+                "File safely saved to disk.",
+                "Saved, but 12 blocks dropped and 34 silence blocks substituted.",
+                "Saved with warnings. Please verify the recording.",
+                "File finalization failed. The recording may be incomplete.",
+                "Stopped: maximum recording length reached.",
+                "Drive D: disconnected. Recording stopped.",
+                "Microphone 1 disconnected. Continuing on the remaining input.",
+                "Microphone 2 disconnected. Recording stopped.",
+                "Split 12 started",
+                "Recording failed.",
+            };
+            foreach (string m in messages)
+                Check(m.Length <= Notifier.MaxBody && m == Notifier.Fit(Notifier.Flatten(m), Notifier.MaxBody),
+                    "notification body fits uncut: \"" + m + "\"");
+
+            foreach (string t in new[]
+            {
+                "Recording Started", "Recording Saved", "File Split", "Max Length Reached",
+                "Drive Disconnected", "Microphone Disconnected", "Error",
+            })
+                Check(t.Length <= Notifier.MaxTitle, "notification title fits uncut: \"" + t + "\"");
         }
 
         private static void TestRf64(string dir)
