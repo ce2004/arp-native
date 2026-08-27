@@ -177,4 +177,8 @@ LAYOUT
   src\CaptureTest.cs    capture pipeline checks
   src\SignalTest.cs     end-to-end signal fidelity check
 
-  _wpf_original\        the previous WPF attempt, kept for reference
+An earlier WPF and NAudio attempt lived in _wpf_original\ and was deleted once
+this replaced it. It never compiled: three mismatched namespaces, a settings
+window that saved device friendly names where the audio engine expected
+endpoint ids, and no implementation behind most of the buttons. It is in this
+repository's first commit if it is ever needed.
