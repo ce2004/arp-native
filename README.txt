@@ -47,6 +47,17 @@ Recordings are written as RF64, the same container libsndfile produces for the
 Python build's format='RF64'. Files verified with soundfile report
 "format=RF64 subtype=PCM_24", so the two builds' output is interchangeable.
 
+Run "ArpRecorder.exe --config" to see exactly how this build reads the file.
+
+BOTH BUILDS SHARE ONE PROGRESS RECORD
+
+The crash-recovery record, active_recording.json, lives at the same path for
+both builds. A session running in either leaves one sitting there, so the other
+must not treat it as evidence of a crash. Before offering to repair anything,
+this build checks whether the audio file is still open for writing and skips it
+if so. Without that check, starting this build while the Python one is
+recording produces an offer to repair the file being written at that moment.
+
 
 BUILDING
 --------
@@ -227,7 +238,25 @@ dependency and the tests run against the shipping code.
       Reports which speech backend loaded, whether the architecture-matched
       controller client was found, and whether NVDA is running. Exit code 0
       means speech is working, 1 means no client was found, 2 means the client
-      loaded but NVDA is not running.
+      loaded but NVDA is not running. Add "say" to hear a test phrase.
+
+    ArpRecorder.exe --config
+
+      Prints how this build reads the shared settings file, including which
+      physical device each configured id resolves to and any keys it does not
+      recognise but will preserve. Read-only; it never writes.
+
+    ArpRecorder.exe --checkupdate
+
+      Reports the installed version, what the release feed offers, the download
+      it would pick for this architecture and the checksum it would verify
+      against. Exit code 0 means up to date, 10 means an update is available,
+      1 means the check failed.
+
+    ArpRecorder.exe --update
+
+      Checks and installs without opening a window, and relaunches headless.
+      Used to exercise the update path unattended.
 
 Each mode writes its transcript to %TEMP%\arp_<mode>_report.txt and exits
 non-zero on failure.
@@ -272,12 +301,18 @@ To check speech is working:
     ArpRecorder.exe --speech        reports the backend and whether NVDA is up
     ArpRecorder.exe --speech say    also sends a test phrase to NVDA
 
-READ-ONLY TEXT
+PROMPTS AND READ-ONLY TEXT
 
-Blocks of read-only text - the dashboard overview, the live statistics, and the
-message in each prompt - are list boxes, not read-only edit controls. A
-read-only edit announces itself as an editable text field, which is misleading;
-a list reads as a list and gives each line its own item on arrow-down.
+A prompt - the repair question, the external drive warning, the update offer -
+is a real dialog whose message is plain static text. The screen reader speaks
+the caption and the whole message as the dialog opens, and Tab then moves only
+between the buttons. The message is not focusable and is not a tab stop, so
+there is nothing to arrow through before the question can be heard.
+
+The dashboard overview and the live statistics are different: they are status
+you go and read, so they are list boxes you can tab to, with one line per item.
+They are not read-only edit controls, because an edit announces itself as an
+editable text field, which is misleading.
 
 The live statistics are rewritten once a second. An update that arrives while
 that list has focus is held back and applied when focus leaves, so the control
@@ -291,6 +326,37 @@ a very long press of the up arrow. Up, Down, Home and End still nudge the
 number and speak the result. When a setting is loaded the largest unit that
 divides it exactly is chosen, so 5400 seconds reads back as 90 minutes and
 7200 as 2 hours.
+
+UPDATING
+
+Releases publish the executables directly, not archives, so there is nothing to
+unpack:
+
+  https://github.com/ce2004/arp-native/releases
+
+The application updates itself in place. Because it is a single file, an update
+is a file swap:
+
+  1. Read the latest release and pick the asset whose name carries this
+     process's architecture.
+  2. Download it and check its SHA-256 against the published sha256sums.txt.
+     A file whose hash does not match is NOT installed, and neither is one from
+     a release that published no checksum at all. The running version is left
+     untouched in both cases.
+  3. Rename the running executable aside. Windows will not let a running
+     executable be deleted, but it will let it be renamed.
+  4. Move the new one into its place and relaunch it.
+  5. The new process waits for the old one to exit and deletes the renamed
+     file.
+
+Nothing is left in the folder afterwards: no second executable, no download
+temporary. Every startup also sweeps for leftovers, so an update interrupted by
+a crash or a power cut is cleared the next time the program runs rather than
+leaving a stray executable behind.
+
+The repository has to stay public for this to work. The updater reads the
+release feed anonymously, exactly as the Python build does; against a private
+repository GitHub answers 404 and no update is ever found.
 
 SOUNDS
 

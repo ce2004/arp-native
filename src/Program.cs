@@ -26,6 +26,13 @@ namespace Arp
                 break;
             }
 
+            // Sweep any leftovers from an interrupted update. This runs for
+            // every invocation, not just a full launch, so the promise that an
+            // update leaves nothing behind does not depend on how the program
+            // was started. It only ever removes this application's own
+            // update temporaries.
+            Updater.CleanupOnStartup();
+
             foreach (string a in args)
             {
                 if (a != "--selftest" && a != "--uitest" && a != "--captest" && a != "--signaltest" &&
@@ -79,10 +86,6 @@ namespace Arp
                      " / " + RuntimeInformation.OSArchitecture +
                      ", process " + RuntimeInformation.ProcessArchitecture +
                      ", version " + Updater.CurrentVersion);
-
-            // Safety net: an update interrupted by a crash or a power cut must
-            // not leave a stray executable in the folder.
-            Updater.CleanupOnStartup();
 
             Win32.EnableDpiAwareness();
             Win32.InitCommonControls();
