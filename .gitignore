@@ -1,0 +1,9 @@
+# Build output
+bin/
+obj/
+publish/
+
+# Local artifacts
+*.user
+*.suo
+.vs/

@@ -1,0 +1,173 @@
+<Window x:Class="AudioRecorderPro.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Recording Settings" Height="600" Width="550" MinWidth="550" MinHeight="600">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="0,0,10,0">
+                <!-- Audio Devices -->
+                <GroupBox Header="Audio Devices" Margin="0,0,0,10">
+                    <Grid Margin="5">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Label Content="Device _Sort Order:" Target="{Binding ElementName=CbSort}" Grid.Row="0" Grid.Column="0"/>
+                        <ComboBox x:Name="CbSort" Grid.Row="0" Grid.Column="1" Margin="5">
+                            <ComboBoxItem Content="Inputs First" IsSelected="True"/>
+                            <ComboBoxItem Content="Outputs First"/>
+                        </ComboBox>
+
+                        <Label Content="Primary Input _1:" Target="{Binding ElementName=CbDevice1}" Grid.Row="1" Grid.Column="0"/>
+                        <ComboBox x:Name="CbDevice1" Grid.Row="1" Grid.Column="1" Margin="5" AutomationProperties.Name="Primary Input 1"/>
+
+                        <Label Content="Secondary Input _2:" Target="{Binding ElementName=CbDevice2}" Grid.Row="2" Grid.Column="0"/>
+                        <ComboBox x:Name="CbDevice2" Grid.Row="2" Grid.Column="1" Margin="5" AutomationProperties.Name="Secondary Input 2"/>
+                    </Grid>
+                </GroupBox>
+
+                <!-- Output Directory -->
+                <GroupBox Header="Output Directory" Margin="0,0,0,10">
+                    <Grid Margin="5">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="TxtFolder" IsReadOnly="True" Grid.Column="0" Margin="5" AutomationProperties.Name="Output Directory"/>
+                        <Button Content="C_hange Folder" Grid.Column="1" Margin="5" Padding="5,0" Click="BtnChangeFolder_Click"/>
+                    </Grid>
+                </GroupBox>
+
+                <!-- Audio Format Settings -->
+                <GroupBox Header="Audio Format Settings" Margin="0,0,0,10">
+                    <Grid Margin="5">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Text="To avoid downsampling/resampling garbage, select the&#x0a;EXACT rate your Windows device is set to!" Foreground="Red" FontStyle="Italic" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Margin="5"/>
+
+                        <Label Content="Sa_mple Rate (Hz):" Target="{Binding ElementName=CbSampleRate}" Grid.Row="1" Grid.Column="0"/>
+                        <ComboBox x:Name="CbSampleRate" Grid.Row="1" Grid.Column="1" Margin="5">
+                            <ComboBoxItem Content="44100"/>
+                            <ComboBoxItem Content="48000" IsSelected="True"/>
+                            <ComboBoxItem Content="88200"/>
+                            <ComboBoxItem Content="96000"/>
+                            <ComboBoxItem Content="192000"/>
+                            <ComboBoxItem Content="384000"/>
+                        </ComboBox>
+
+                        <Label Content="_Bit Depth:" Target="{Binding ElementName=CbBitDepth}" Grid.Row="2" Grid.Column="0"/>
+                        <ComboBox x:Name="CbBitDepth" Grid.Row="2" Grid.Column="1" Margin="5">
+                            <ComboBoxItem Content="16"/>
+                            <ComboBoxItem Content="24" IsSelected="True"/>
+                            <ComboBoxItem Content="32"/>
+                        </ComboBox>
+
+                        <Label Content="_Channels:" Target="{Binding ElementName=CbChannels}" Grid.Row="3" Grid.Column="0"/>
+                        <ComboBox x:Name="CbChannels" Grid.Row="3" Grid.Column="1" Margin="5">
+                            <ComboBoxItem Content="1 (Mono)"/>
+                            <ComboBoxItem Content="2 (Stereo)" IsSelected="True"/>
+                        </ComboBox>
+
+                        <Label Content="B_uffer Size (Frames):" Target="{Binding ElementName=CbBufferSize}" Grid.Row="4" Grid.Column="0"/>
+                        <ComboBox x:Name="CbBufferSize" Grid.Row="4" Grid.Column="1" Margin="5">
+                            <ComboBoxItem Content="512"/>
+                            <ComboBoxItem Content="1024"/>
+                            <ComboBoxItem Content="2048" IsSelected="True"/>
+                            <ComboBoxItem Content="4096"/>
+                            <ComboBoxItem Content="8192"/>
+                        </ComboBox>
+                    </Grid>
+                </GroupBox>
+
+                <!-- File, Delay & Auto-Split Settings -->
+                <GroupBox Header="File, Delay &amp; Auto-Split Settings" Margin="0,0,0,10">
+                    <Grid Margin="5">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Label Content="File _Prefix:" Target="{Binding ElementName=TxtPrefix}" Grid.Row="0" Grid.Column="0"/>
+                        <TextBox x:Name="TxtPrefix" Grid.Row="0" Grid.Column="1" Margin="5" AutomationProperties.Name="File Prefix"/>
+
+                        <CheckBox x:Name="ChkAutoStart" Content="Auto-st_art recording on launch" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Margin="5"/>
+
+                        <Label Content="Start De_lay:" Target="{Binding ElementName=TxtDelay}" Grid.Row="2" Grid.Column="0"/>
+                        <TextBox x:Name="TxtDelay" Text="0" Grid.Row="2" Grid.Column="1" Margin="5" AutomationProperties.Name="Start Delay"/>
+
+                        <Label Content="Max Recording Length (0=off):" Target="{Binding ElementName=TxtMaxLen}" Grid.Row="3" Grid.Column="0"/>
+                        <TextBox x:Name="TxtMaxLen" Text="0" Grid.Row="3" Grid.Column="1" Margin="5" AutomationProperties.Name="Max Recording Length"/>
+
+                        <Label Content="Time Auto-S_plit every:" Target="{Binding ElementName=TxtSplit}" Grid.Row="4" Grid.Column="0"/>
+                        <TextBox x:Name="TxtSplit" Text="0" Grid.Row="4" Grid.Column="1" Margin="5" AutomationProperties.Name="Time Auto-Split every"/>
+
+                        <CheckBox x:Name="ChkGroupSplits" Content="Automatically place all splits into a unified folder" IsChecked="True" Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Margin="5"/>
+                    </Grid>
+                </GroupBox>
+
+                <!-- Appearance & Extra Options -->
+                <GroupBox Header="Appearance &amp; Extra Options" Margin="0,0,0,10">
+                    <Grid Margin="5">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Label Content="Window _Title:" Target="{Binding ElementName=TxtTitle}" Grid.Row="0" Grid.Column="0"/>
+                        <TextBox x:Name="TxtTitle" Text="Accessible Advanced Audio Recorder" Grid.Row="0" Grid.Column="1" Margin="5" AutomationProperties.Name="Window Title"/>
+
+                        <CheckBox x:Name="ChkUpdateStartup" Content="Check for _updates on startup" IsChecked="True" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Margin="5"/>
+
+                        <Button Content="Check for _Updates Now" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Margin="5,5,5,5" HorizontalAlignment="Left" Padding="10,2"/>
+                        <Button Content="Configure Notifications" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Margin="5,0,5,5" HorizontalAlignment="Left" Padding="10,2"/>
+                        <Button Content="Configure Sounds" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Margin="5,0,5,5" HorizontalAlignment="Left" Padding="10,2"/>
+                        <Button Content="Configure Audio Channels" Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Margin="5,0,5,5" HorizontalAlignment="Left" Padding="10,2"/>
+                        <Button Content="Copy Diagnostic Logs" Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" Margin="5,0,5,5" HorizontalAlignment="Left" Padding="10,2"/>
+                    </Grid>
+                </GroupBox>
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button Content="Save &amp;&amp; Close" Padding="10,5" Click="BtnSaveClose_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

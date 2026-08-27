@@ -1,0 +1,305 @@
+using System;
+using System.Collections.Generic;
+
+namespace Arp
+{
+    /// <summary>
+    /// "Notification Settings" — the eight toggles from the Python dialog, in
+    /// the same order.
+    /// </summary>
+    internal sealed class NotificationsDialog : DialogBase
+    {
+        internal const int IdStartStop = 1101;
+        internal const int IdSplit = 1102;
+        internal const int IdError = 1103;
+        internal const int IdDrive = 1104;
+        internal const int IdMic = 1105;
+        internal const int IdConfirmExit = 1106;
+        internal const int IdFocusSpeak = 1107;
+        internal const int IdAutoResume = 1108;
+
+        private readonly Config _cfg;
+
+        public NotificationsDialog(Config cfg) => _cfg = cfg;
+
+        protected override byte[] BuildTemplate()
+        {
+            var b = new DialogBuilder("Notification Settings", 300, 172);
+            int y = 8;
+            void Row(int id, string text)
+            {
+                b.CheckBox(id, text, 8, y, 284, 14);
+                y += 16;
+            }
+
+            Row(IdStartStop, "Notify on Start/Stop Recording");
+            Row(IdSplit, "Notify on Auto-Split");
+            Row(IdError, "Notify on recording errors");
+            Row(IdDrive, "Notify when output drive disconnects");
+            Row(IdMic, "Notify on microphone disconnect");
+            Row(IdConfirmExit, "Confirm exit while recording");
+            Row(IdFocusSpeak, "Speak announcements only when window is in focus");
+            Row(IdAutoResume, "Auto-resume unattended recording if drive/mic reconnects");
+
+            b.DefButton(Win32.IDOK, "Save && Close", 8, y + 6, 80, 16);
+            return b.Build();
+        }
+
+        protected override void OnInit()
+        {
+            Checked(IdStartStop, _cfg.NotifyStartStop);
+            Checked(IdSplit, _cfg.NotifySplit);
+            Checked(IdError, _cfg.NotifyError);
+            Checked(IdDrive, _cfg.NotifyDriveDisconnect);
+            Checked(IdMic, _cfg.NotifyMicDisconnect);
+            Checked(IdConfirmExit, _cfg.ConfirmExit);
+            Checked(IdFocusSpeak, _cfg.SpeakInFocusOnly);
+            Checked(IdAutoResume, _cfg.AutoResumeUnattended);
+        }
+
+        protected override bool OnCommand(int id, int code)
+        {
+            if (id == Win32.IDOK)
+            {
+                _cfg.NotifyStartStop = Checked(IdStartStop);
+                _cfg.NotifySplit = Checked(IdSplit);
+                _cfg.NotifyError = Checked(IdError);
+                _cfg.NotifyDriveDisconnect = Checked(IdDrive);
+                _cfg.NotifyMicDisconnect = Checked(IdMic);
+                _cfg.SpeakInFocusOnly = Checked(IdFocusSpeak);
+                _cfg.AutoResumeUnattended = Checked(IdAutoResume);
+                _cfg.ConfirmExit = Checked(IdConfirmExit);
+                _cfg.Save();
+                Close(1);
+                return true;
+            }
+            if (id == Win32.IDCANCEL) { Close(0); return true; }
+            return false;
+        }
+    }
+
+    /// <summary>"Configure Sounds" — the four cue toggles and the volume.</summary>
+    internal sealed class SoundsDialog : DialogBase
+    {
+        internal const int IdStart = 1201;
+        internal const int IdStop = 1202;
+        internal const int IdPause = 1203;
+        internal const int IdUnpause = 1204;
+        internal const int IdVolume = 1205;
+
+        private readonly Config _cfg;
+        private SpinEdit _volume;
+
+        public SoundsDialog(Config cfg) => _cfg = cfg;
+
+        protected override byte[] BuildTemplate()
+        {
+            var b = new DialogBuilder("Configure Sounds", 260, 116);
+            int y = 8;
+            void Row(int id, string text)
+            {
+                b.CheckBox(id, text, 8, y, 244, 14);
+                y += 16;
+            }
+
+            Row(IdStart, "Play sound on Start");
+            Row(IdStop, "Play sound on Stop");
+            Row(IdPause, "Play sound on Pause");
+            Row(IdUnpause, "Play sound on Unpause");
+
+            b.Label("Sound Effects &Volume:", 8, y + 3, 100, 10);
+            b.Edit(IdVolume, 112, y, 90, 14);
+            y += 22;
+
+            b.DefButton(Win32.IDOK, "Save && Close", 8, y + 4, 80, 16);
+            return b.Build();
+        }
+
+        protected override void OnInit()
+        {
+            Checked(IdStart, _cfg.SndStart);
+            Checked(IdStop, _cfg.SndStop);
+            Checked(IdPause, _cfg.SndPause);
+            Checked(IdUnpause, _cfg.SndUnpause);
+
+            _volume = new SpinEdit(Hwnd, IdVolume, 1, 100, 1,
+                PercentText.Format, t => PercentText.Parse(t, _cfg.SndVolume));
+            _volume.Value = _cfg.SndVolume;
+        }
+
+        protected override bool OnCommand(int id, int code)
+        {
+            if (id == Win32.IDOK)
+            {
+                _cfg.SndStart = Checked(IdStart);
+                _cfg.SndStop = Checked(IdStop);
+                _cfg.SndPause = Checked(IdPause);
+                _cfg.SndUnpause = Checked(IdUnpause);
+                _cfg.SndVolume = _volume.Value;
+                _cfg.Save();
+                Close(1);
+                return true;
+            }
+            if (id == Win32.IDCANCEL) { Close(0); return true; }
+            return false;
+        }
+    }
+
+    /// <summary>"Configure Audio Channels" — per-input routing and the mic-loss policy.</summary>
+    internal sealed class ChannelsDialog : DialogBase
+    {
+        internal const int IdIn1 = 1301;
+        internal const int IdIn2 = 1302;
+        internal const int IdContinue = 1303;
+
+        private static readonly string[] Routes = { "Both Channels", "Left Channel Only", "Right Channel Only" };
+
+        private readonly Config _cfg;
+
+        public ChannelsDialog(Config cfg) => _cfg = cfg;
+
+        protected override byte[] BuildTemplate()
+        {
+            var b = new DialogBuilder("Configure Audio Channels", 280, 92);
+            b.Label("Input &1 Routing:", 8, 11, 90, 10);
+            b.Combo(IdIn1, 102, 8, 168, 80);
+            b.Label("Input &2 Routing:", 8, 33, 90, 10);
+            b.Combo(IdIn2, 102, 30, 168, 80);
+            b.CheckBox(IdContinue, "Continue recording if a mic disconnects", 8, 52, 264, 14);
+            b.DefButton(Win32.IDOK, "Save && Close", 8, 70, 80, 16);
+            return b.Build();
+        }
+
+        protected override void OnInit()
+        {
+            foreach (string r in Routes)
+            {
+                Win32.ComboAdd(Hwnd, IdIn1, r, 0);
+                Win32.ComboAdd(Hwnd, IdIn2, r, 0);
+            }
+            Win32.ComboSelectByText(Hwnd, IdIn1, _cfg.In1Route);
+            Win32.ComboSelectByText(Hwnd, IdIn2, _cfg.In2Route);
+            Checked(IdContinue, _cfg.ContinueOnMicDisconnect);
+        }
+
+        protected override bool OnCommand(int id, int code)
+        {
+            if (id == Win32.IDOK)
+            {
+                _cfg.In1Route = Win32.ComboGetText(Hwnd, IdIn1);
+                _cfg.In2Route = Win32.ComboGetText(Hwnd, IdIn2);
+                _cfg.ContinueOnMicDisconnect = Checked(IdContinue);
+                _cfg.Save();
+                Close(1);
+                return true;
+            }
+            if (id == Win32.IDCANCEL) { Close(0); return true; }
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// "Incomplete Recording Detected" — offers to rebuild the header of a file
+    /// left behind by a crash. Returns 1 to repair, 2 to forget, 0 to leave alone.
+    /// </summary>
+    internal sealed class RepairDialog : DialogBase
+    {
+        internal const int IdText = 1401;
+        internal const int IdRepair = 1402;
+        internal const int IdLeave = 1403;
+        internal const int IdForget = 1404;
+
+        private readonly string _filepath;
+
+        public RepairDialog(string filepath) => _filepath = filepath;
+
+        protected override byte[] BuildTemplate()
+        {
+            var b = new DialogBuilder("Incomplete Recording Detected", 320, 130);
+            b.ReadOnlyText(IdText, 8, 8, 304, 62, true);
+            b.DefButton(IdRepair, "Yes, &Repair Recording", 8, 78, 100, 16);
+            b.Button(IdLeave, "&No, Leave it alone", 114, 78, 92, 16);
+            b.Button(IdForget, "&Forget this recovery information", 8, 100, 150, 16);
+            return b.Build();
+        }
+
+        protected override void OnInit()
+        {
+            Text(IdText,
+                "It looks like Audio Recorder Pro was closed unexpectedly during your last session, " +
+                "and a recording may not have been finalized correctly.\r\n\r\n" +
+                "File: " + _filepath + "\r\n\r\n" +
+                "Would you like to attempt to repair this audio file now?");
+            Focus(IdRepair);
+        }
+
+        protected override bool OnCommand(int id, int code)
+        {
+            switch (id)
+            {
+                case IdRepair: Close(1); return true;
+                case IdLeave:
+                case Win32.IDCANCEL: Close(0); return true;
+                case IdForget: Close(2); return true;
+            }
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// "Update Available" — the release-notes list from the Python updater.
+    /// Reachable once a real release feed is wired into <see cref="Updater"/>.
+    /// </summary>
+    internal sealed class UpdateDialog : DialogBase
+    {
+        internal const int IdInfo = 1501;
+        internal const int IdWhatsNew = 1502;
+        internal const int IdList = 1503;
+        internal const int IdUpdate = 1504;
+        internal const int IdSkip = 1505;
+
+        private readonly string _current, _newVersion, _notes;
+
+        public UpdateDialog(string current, string newVersion, string notes)
+        {
+            _current = current;
+            _newVersion = newVersion;
+            _notes = notes ?? string.Empty;
+        }
+
+        protected override byte[] BuildTemplate()
+        {
+            var b = new DialogBuilder("Update Available", 320, 190);
+            b.ReadOnlyText(IdInfo, 8, 8, 304, 24);
+            b.Label("What's new:", 8, 38, 100, 10, IdWhatsNew);
+            b.ListBox(IdList, 8, 52, 304, 100);
+            b.DefButton(IdUpdate, "&Update Now", 8, 160, 80, 16);
+            b.Button(IdSkip, "&Don't Update", 94, 160, 80, 16);
+            return b.Build();
+        }
+
+        protected override void OnInit()
+        {
+            Text(IdInfo, "There's an update available. You will be upgrading from version " +
+                         _current + " to " + _newVersion + ".");
+
+            foreach (string raw in _notes.Split('\n'))
+            {
+                string line = raw.Trim();
+                if (line.StartsWith("-", StringComparison.Ordinal) || line.StartsWith("*", StringComparison.Ordinal))
+                    line = line.Substring(1).Trim();
+                if (line.Length > 0)
+                    Win32.SendDlgItemMessageString(Hwnd, IdList, Win32.LB_ADDSTRING, IntPtr.Zero, line);
+            }
+            Win32.SendDlgItemMessageW(Hwnd, IdList, Win32.LB_SETCURSEL, IntPtr.Zero, IntPtr.Zero);
+            Focus(IdUpdate);
+        }
+
+        protected override bool OnCommand(int id, int code)
+        {
+            if (id == IdUpdate) { Close(1); return true; }
+            if (id == IdSkip || id == Win32.IDCANCEL) { Close(0); return true; }
+            return false;
+        }
+    }
+}

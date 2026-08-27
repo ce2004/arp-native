@@ -1,0 +1,108 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # The GitHub Windows runners already carry the MSVC toolchain that
+      # NativeAOT needs to link, including the ARM64 cross tools, so no
+      # local C++ install is required to produce either binary.
+      - name: Publish (NativeAOT, self-contained)
+        run: dotnet publish -r ${{ matrix.rid }} -c Release -o publish/${{ matrix.rid }}
+
+      # Only the x64 build can execute on an x64 runner. The headless checks
+      # cover config, the duration grammar, routing, the RF64 container and the
+      # dialog templates. The device tests (--uitest, --captest, --signaltest)
+      # need real audio endpoints and are run locally.
+      - name: Run self-test
+        if: matrix.rid == 'win-x64'
+        run: |
+          .\publish\${{ matrix.rid }}\ArpRecorder.exe --selftest
+          if ($LASTEXITCODE -ne 0) { throw "Self-test failed" }
+
+      - name: Report binary size
+        run: |
+          $exe = Get-Item "publish\${{ matrix.rid }}\ArpRecorder.exe"
+          "${{ matrix.rid }}: {0:N2} MB" -f ($exe.Length / 1MB)
+
+      - name: Create archive
+        run: |
+          Compress-Archive -Path "publish\${{ matrix.rid }}\*" `
+                           -DestinationPath "Audio Recorder Pro-${{ matrix.rid }}.zip"
+
+      - name: Generate SHA256 checksum
+        run: |
+          $h = (Get-FileHash "Audio Recorder Pro-${{ matrix.rid }}.zip" -Algorithm SHA256).Hash
+          "$h  Audio Recorder Pro-${{ matrix.rid }}.zip" |
+            Out-File -FilePath "sha256-${{ matrix.rid }}.txt" -Encoding utf8 -NoNewline
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}
+          path: |
+            Audio Recorder Pro-${{ matrix.rid }}.zip
+            sha256-${{ matrix.rid }}.txt
+
+  release:
+    needs: build
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect files
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Get-ChildItem artifacts -Recurse -File | Move-Item -Destination dist
+          Get-Content dist\sha256-*.txt | Out-File dist\sha256sums.txt -Encoding utf8
+          Get-ChildItem dist
+
+      # The app reads these notes aloud through the screen reader, so the commit
+      # message is used verbatim and must stay free of markdown "#" and "*".
+      - name: Extract commit message for release notes
+        run: git log -1 --pretty=%B | Out-File -FilePath release_notes.txt -Encoding utf8
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/Audio Recorder Pro-win-x64.zip
+            dist/Audio Recorder Pro-win-arm64.zip
+            dist/sha256sums.txt
+          body_path: release_notes.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
