@@ -1,0 +1,277 @@
+AI ASSISTANT GUIDE - AUDIO RECORDER PRO, NATIVE BUILD
+
+Hello AI Assistant. The repository owner is blind and uses NVDA. Read this
+before changing anything here.
+
+
+FORMATTING RULE - NO NUMBER SIGNS OR ASTERISKS
+
+Do not use the "#" or "*" characters in ANY file you write here, including
+commit messages. A screen reader speaks "#" aloud as "Number", which ruins the
+reading. Use ALL CAPS or dashed underlines for headings instead.
+
+This matters doubly for commit messages: the release workflow uses your commit
+message verbatim as the release notes, and the application reads release notes
+aloud through NVDA.
+
+
+WHAT THIS IS
+
+A single self contained executable. Raw Win32 plus NativeAOT. No WPF, no
+WinForms, no NuGet packages, no runtime to install, nothing beside the exe.
+It replaces a Python and PyQt6 recorder that still lives in
+C:\Users\Conner\Downloads\arp and is still in use.
+
+  Repository   https://github.com/ce2004/arp-native   public, must stay public
+  Size         about 3 MB per architecture
+  Targets      win-arm64 and win-x64, both native, not emulated
+
+The repository MUST stay public. The updater reads the release feed with no
+credentials. Against a private repository GitHub answers 404 and no update is
+ever found.
+
+
+RULES THAT ARE NOT NEGOTIABLE
+
+1. NEVER write into C:\Users\Conner\Downloads\arp-native-build. That folder is
+   the owner's install location. Verify downloads in a scratch folder such as
+   the temp directory. An earlier assistant used it as scratch space and
+   silently replaced the program the owner was running.
+
+2. NEVER launch the GUI while a recording may be in progress. Check first by
+   listing C:\Users\Conner\Documents\apps\arp. If the newest wav is still
+   growing, or active_recording.json is present and recent, a session is live.
+   Use the headless switches below instead.
+
+3. NEVER delete or modify anything under C:\Users\Conner\Documents\apps\arp.
+   Those are irreplaceable recordings.
+
+4. Do not touch C:\Users\Conner\Downloads\arp unless asked. That is the live
+   Python application.
+
+5. Both builds share one settings file, one log file, and one crash recovery
+   record, all under %LOCALAPPDATA%\Audio Recorder Pro. Assume the other build
+   may have them open.
+
+
+BUILDING AND TESTING LOCALLY
+
+Requires only the .NET 8 SDK. A plain build compiles and runs every test.
+
+    cd C:\Users\Conner\Downloads\arp_csharp
+    dotnet build
+
+The NativeAOT publish additionally needs the Microsoft C++ linker, which is NOT
+installed on this machine. Do not install a multi gigabyte C++ workload just to
+get a build. Build on GitHub instead, as described below.
+
+Run the tests from bin\Debug\net8.0-windows\win-arm64\ArpRecorder.exe
+
+    --selftest [refSoundsDir]  headless checks: config, durations, routing, the
+                               RF64 container, crash repair, the sound library,
+                               the updater, dialog templates. Pass
+                               C:\Users\Conner\Downloads\arp\sounds to also
+                               compare the four original cues sample for sample
+                               against the Python originals.
+    --uitest                   creates every dialog hidden and inspects it
+    --captest [secs] [opts]    real capture pipeline into a temp folder
+    --signaltest               plays a tone into a virtual cable, captures it
+                               back, checks amplitude and frequency
+    --timing                   times each startup and shutdown phase
+    --speech [say]             reports the NVDA client state
+    --config                   prints how the settings file is read, read only
+    --devices                  lists audio endpoints with their ids
+    --sounds                   lists the cue library
+    --checkupdate              reports what the release feed offers
+    --update                   installs headlessly
+    --version                  prints version and architecture
+
+IMPORTANT. These are windowed programs. PowerShell does not wait for them and
+never sets the exit code. Always launch them like this:
+
+    $p = Start-Process -FilePath $exe -ArgumentList "--selftest" -Wait -PassThru -NoNewWindow
+    $p.ExitCode
+
+Each mode also writes its transcript to %TEMP%\arp_<mode>_report.txt, which is
+the reliable way to read the result.
+
+All tests must pass before you release. There are over 880 checks.
+
+
+PUSHING A RELEASE ON GITHUB
+
+The build runs on GitHub Actions because the hosted Windows runners already
+carry the MSVC toolchain, including the ARM64 cross tools.
+
+STEP 0 - TOOLS
+
+    git --version
+    gh --version
+
+Both are installed. If a fresh shell cannot see them, refresh PATH:
+
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
+                [System.Environment]::GetEnvironmentVariable("Path","User")
+
+STEP 1 - AUTHENTICATION
+
+You cannot do this yourself. It needs a browser and a one time code. Ask Conner
+to run it in the prompt, where a leading exclamation mark runs it in session:
+
+    ! gh auth login --hostname github.com --git-protocol https --web --scopes "repo,workflow,read:org,gist"
+
+The workflow scope is required, or the push is rejected for touching files
+under .github\workflows. If he is already logged in the command asks whether to
+re authenticate, and he must answer yes or the scopes do not change.
+
+Confirm before continuing:
+
+    gh auth status
+
+Never ask for, echo, or store a personal access token.
+
+STEP 2 - BUMP THE VERSION
+
+Edit CurrentVersion in src\Updater.cs. It must start with a lowercase v. The
+tag you push later must match it EXACTLY, or the updater offers the same update
+forever.
+
+STEP 3 - COMMIT
+
+Plain sentences. No "#" and no "*" anywhere. This text is read aloud.
+
+    git add -A
+    git commit -m "Fixed X. Added Y."
+    git push origin main
+
+STEP 4 - TAG AND RELEASE
+
+Pushing the tag is what builds and publishes. Nothing else does.
+
+    git tag v2.3.0
+    git push origin v2.3.0
+
+Watch it:
+
+    $id = gh run list --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId'
+    gh run watch $id --interval 20 --exit-status
+
+The workflow builds both architectures, runs the self test on the x64 build,
+and attaches three assets: ArpRecorder-win-arm64.exe, ArpRecorder-win-x64.exe,
+and sha256sums.txt. Executables, never archives.
+
+For a plain build with downloadable artifacts and no release:
+
+    gh workflow run release.yml --ref main
+
+STEP 5 - VERIFY, IN A SCRATCH FOLDER
+
+    $tmp = Join-Path $env:TEMP "verify"
+    New-Item -ItemType Directory -Force $tmp | Out-Null
+    curl -sL -o "$tmp\a.exe" https://github.com/ce2004/arp-native/releases/download/v2.3.0/ArpRecorder-win-arm64.exe
+    (Get-FileHash "$tmp\a.exe" -Algorithm SHA256).Hash
+
+Compare against sha256sums.txt. Do NOT copy it into arp-native-build.
+
+
+HOW THE UPDATER WORKS
+
+The whole application is one file, so an update is a file swap. It reads the
+latest release, picks the asset whose name carries this process's architecture,
+downloads it, and checks its SHA-256 against sha256sums.txt. A file whose hash
+does not match is not installed, and neither is one from a release with no
+published checksum. Then it renames the running exe aside, moves the new one
+into place, relaunches, and the new process deletes the renamed file once the
+old one has exited. Nothing is left behind. Every startup also sweeps for
+leftovers from an interrupted attempt.
+
+If you change the asset naming in the workflow you must change the matching in
+Check() in src\Updater.cs, or updates silently stop being found.
+
+
+HOW THE PROGRAM IS USED
+
+Main window, tab order: Exit, Settings, Start Recording, Pause, then the
+overview list, then the live statistics list.
+
+Settings holds the audio devices, output folder, sample rate, bit depth,
+channels, buffer size, file prefix, auto start and its delay, maximum length,
+auto split, window title, update checking, and buttons for Notifications,
+Sounds, Audio Channels, and Copy Diagnostic Logs.
+
+Durations are a number plus a unit combo of Seconds, Minutes or Hours. Arrow
+keys nudge the number and speak the result.
+
+Configure Sounds gives each of start, stop, pause and unpause its own checkbox
+and its own sound combo, from a library of 65 cues generated in code. Choosing
+a sound plays it immediately. There is no sounds folder.
+
+Recordings are written as RF64, the same container the Python build produces,
+so files from the two are interchangeable.
+
+
+ACCESSIBILITY RULES FOR ANY UI YOU ADD
+
+- A prompt is a real dialog whose message is static text, so the screen reader
+  speaks the whole thing on open and Tab moves only between the buttons. Never
+  put a prompt's message in a focusable control.
+- Read only status blocks are list boxes, one line per item. Never use a read
+  only edit control; it announces itself as an editable text field.
+- Never rebuild a list while it has focus. Defer the update until focus leaves.
+- Never hide a control that has focus without moving focus somewhere first.
+- Notification bodies are one short sentence. The shell caps them at 63
+  characters of title and 255 of body and clips the toast after two or three
+  lines anyway. Long wording goes in the dialog and to the screen reader.
+- NVDA only. There is no SAPI fallback, deliberately. A second voice talking
+  over NVDA is worse than saying nothing.
+
+
+THINGS THAT WILL BITE YOU
+
+- The NVDA controller client must match THIS process's architecture, not
+  NVDA's. NVDA here is an x64 build under emulation, but the native ARM64
+  recorder needs the ARM64 client. It is embedded in the exe and unpacked to
+  %LOCALAPPDATA%\Audio Recorder Pro on first run.
+- Do not use HttpClient. Pulling System.Net.Http into the AOT image more than
+  doubled the binary. Use src\Http.cs, which is WinHTTP.
+- Open the log with FileShare.ReadWrite. File.AppendAllText asks for
+  FileShare.Read and fails outright when the Python build has the log open,
+  silently discarding every line.
+- An input that goes quiet for two seconds is a WARNING only. It must never
+  stop the recording. The Python build did that, which turned a brief driver
+  hiccup into the permanent end of an unattended session.
+- Do not offer to repair a file that is still open for writing. Both builds
+  share one crash recovery record, so a live session in either leaves one.
+- Do not poll while idle. The drive watcher runs only during a recording, and
+  removal arrives instantly as a WM_DEVICECHANGE broadcast.
+- WASAPI hands over whole packets and ReleaseBuffer is all or nothing. A
+  partially consumed packet must be carried over, or that audio is lost.
+
+
+LAYOUT
+
+  src\Program.cs        entry point, message loop, diagnostic switches
+  src\MainWindow.cs     dashboard, recording state machine, failure handling
+  src\SettingsDialog.cs the settings window
+  src\Dialogs.cs        notifications, sounds, channels, repair, update
+  src\UiCore.cs         dialog base, spin edits, duration fields, folder picker
+  src\DialogBuilder.cs  in memory dialog template construction
+  src\Win32.cs          user32, kernel32, comctl32 interop
+  src\Wasapi.cs         device enumeration and capture through COM vtables
+  src\Recorder.cs       reader threads, mixing writer loop, split, journal
+  src\Wav.cs            RF64 writer and the crash repair routine
+  src\Monitors.cs       drive monitor and auto resume watcher
+  src\Config.cs         settings, shared with the Python build
+  src\Json.cs           minimal order preserving JSON
+  src\Speech.cs         NVDA controller client, embedded and unpacked on demand
+  src\SoundLibrary.cs   the 65 cue library, generated in code
+  src\Sounds.cs         cue playback through waveOut
+  src\Notifier.cs       shell tray balloon notifications
+  src\Http.cs           WinHTTP, used by the updater
+  src\Log.cs            rotating diagnostic log
+  src\Updater.cs        release feed, download, verify, self replace
+  src\SelfTest.cs       headless checks
+  src\UiTest.cs         dialog checks
+  src\CaptureTest.cs    capture pipeline checks
+  src\SignalTest.cs     end to end signal fidelity check
+  src\TimingTest.cs     startup and shutdown timings
