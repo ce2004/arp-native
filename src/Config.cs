@@ -84,7 +84,7 @@ namespace Arp
 
         public bool AutoStart { get => B("auto_start", false); set => Set("auto_start", value); }
         public int AutoStartDelay { get => I("auto_start_delay", 0); set => Set("auto_start_delay", value); }
-        public string SaveFolder { get => S("save_folder", Directory.GetCurrentDirectory()); set => Set("save_folder", value); }
+        public string SaveFolder { get => S("save_folder", ""); set => Set("save_folder", value); }
         public string SampleRate { get => S("sample_rate", "48000"); set => Set("sample_rate", value); }
         public string BitDepth { get => S("bit_depth", "24"); set => Set("bit_depth", value); }
         public string Channels { get => S("channels", "2"); set => Set("channels", value); }

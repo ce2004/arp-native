@@ -261,12 +261,14 @@ namespace Arp
         {
             string devId = _cfg.DeviceId;
             var mic = _devices.Find(d => d.Id == devId);
-            string micName = mic != null ? mic.Name : "None Selected (Will use default)";
+            string micName = mic != null ? mic.Name
+                : string.IsNullOrEmpty(devId) || devId == "none" ? "Not set" : "Disconnected";
+            string folder = string.IsNullOrEmpty(_cfg.SaveFolder) ? "Not set" : _cfg.SaveFolder;
 
             int split = _cfg.AutoSplitSecs;
             string overview =
                 "Recording Device is set to: " + micName + "\n" +
-                "Output Folder is set to: " + _cfg.SaveFolder + "\n" +
+                "Output Folder is set to: " + folder + "\n" +
                 "Auto-Recording is: " + (_cfg.AutoStart ? "On" : "Off") + "\n" +
                 "Auto-Split is: " + (split > 0 ? TimeText.Format(split) : "Off") + "\n" +
                 _statusMsg;
@@ -423,11 +425,21 @@ namespace Arp
         {
             PopulateDevices();
             var dlg = new SettingsDialog(_cfg, _devices);
-            if ((long)dlg.ShowModal(Hwnd) == 1)
+            dlg.ShowModal(Hwnd);
+
+            // Refreshed however the dialog closed: Check for Updates Now saves
+            // the settings too, and the dialog can then be closed with Escape.
+            Win32.SetWindowTextW(Hwnd, _cfg.WindowTitle);
+            Notifier.AppName = _cfg.WindowTitle; // notifications follow the window title
+            UpdateDashboard();
+
+            // A watcher waiting to resume holds the devices and folder it was
+            // started with. Restart it so it waits for the ones now configured.
+            if (_autoResume != null && _autoResume.IsRunning)
             {
-                Win32.SetWindowTextW(Hwnd, _cfg.WindowTitle);
-                Notifier.AppName = _cfg.WindowTitle; // notifications follow the window title
-                UpdateDashboard();
+                string missing = _autoResume.Missing;
+                _autoResume.Stop();
+                StartAutoResume(missing);
             }
         }
 

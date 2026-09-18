@@ -233,9 +233,14 @@ namespace Arp
                 Eq(Win32.IsChecked(h, SettingsDialog.IdGroupSplits), false, "group splits unchecked from config");
                 Eq(Win32.IsChecked(h, SettingsDialog.IdUpdateStartup), true, "update check checked from config");
 
-                // Input 2 carries an extra "None" row.
-                Eq(ComboCount(h, SettingsDialog.IdDevice2), ComboCount(h, SettingsDialog.IdDevice1) + 1,
-                    "secondary input list has a None entry");
+                // Input 2 carries a "None" row, and an unconfigured Input 1 a
+                // "Not selected" row rather than the first device preselected.
+                Eq(ComboCount(h, SettingsDialog.IdDevice2), ComboCount(h, SettingsDialog.IdDevice1),
+                    "both input lists carry one extra row");
+                Eq(Win32.ComboGetText(h, SettingsDialog.IdDevice1), "Not selected",
+                    "an unconfigured primary input shows Not selected");
+                Eq(Win32.ComboGetText(h, SettingsDialog.IdDevice2), "None",
+                    "an unconfigured secondary input shows None");
                 Eq(Win32.ComboGetText(h, SettingsDialog.IdDevice2), "None", "secondary input defaults to None");
             }
             finally

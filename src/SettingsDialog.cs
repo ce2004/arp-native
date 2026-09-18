@@ -223,8 +223,15 @@ namespace Arp
 
         private void SelectDevice(int comboId, string wantedId, int insertAt)
         {
-            if (string.IsNullOrEmpty(wantedId)) { Win32.ComboSetSel(Hwnd, comboId, 0); return; }
-            if (wantedId == "none") { Win32.ComboSetSel(Hwnd, comboId, 0); return; }
+            // Nothing configured: say so, rather than showing the first device
+            // as if it had been chosen and saving it on the next Save.
+            if (comboId == IdDevice1 && (string.IsNullOrEmpty(wantedId) || wantedId == "none"))
+            {
+                Win32.ComboInsert(Hwnd, comboId, 0, "Not selected", -1);
+                Win32.ComboSetSel(Hwnd, comboId, 0);
+                return;
+            }
+            if (string.IsNullOrEmpty(wantedId) || wantedId == "none") { Win32.ComboSetSel(Hwnd, comboId, 0); return; }
 
             int index = _deviceIds.IndexOf(wantedId);
             if (index >= 0)
@@ -248,7 +255,7 @@ namespace Arp
         private string SelectedDeviceId(int comboId)
         {
             int data = Win32.ComboGetData(Hwnd, comboId);
-            if (data < 0 || data >= _deviceIds.Count) return "none";
+            if (data < 0 || data >= _deviceIds.Count) return comboId == IdDevice1 ? "" : "none";
             return _deviceIds[data];
         }
 
@@ -267,7 +274,9 @@ namespace Arp
                     return true;
 
                 case IdCheckUpdates:
-                    Updater.CheckNow(Hwnd);
+                    // An update relaunches the program, and anything changed in
+                    // this dialog but not saved would be lost with it.
+                    if (ApplySettings()) Updater.CheckNow(Hwnd);
                     return true;
 
                 case IdNotifications:
@@ -335,13 +344,19 @@ namespace Arp
 
         private void SaveAndClose()
         {
+            if (ApplySettings()) Close(1);
+        }
+
+        /// <summary>Validates and saves what the dialog shows. False if the user must fix something first.</summary>
+        private bool ApplySettings()
+        {
             string d1 = SelectedDeviceId(IdDevice1);
             string d2 = SelectedDeviceId(IdDevice2);
 
             if (d2 != "none" && d1 == d2)
             {
                 Warn("Input 1 and Input 2 cannot be the same device.", "Invalid Selection");
-                return;
+                return false;
             }
 
             if (d2 != "none" && d1 != d2)
@@ -353,7 +368,7 @@ namespace Arp
                     "audio dropouts, clicks, or sync issues as the application drops blocks to keep them aligned.\r\n\r\n" +
                     "Do you still want to use two independent devices?",
                     "Hardware Clock Drift Warning");
-                if (!proceed) return;
+                if (!proceed) return false;
             }
 
             _cfg.DeviceId = d1;
@@ -380,7 +395,7 @@ namespace Arp
             _cfg.DeviceSortOrder = Win32.ComboGetText(Hwnd, IdSort);
 
             _cfg.Save();
-            Close(1);
+            return true;
         }
     }
 }
