@@ -32,7 +32,7 @@ namespace Arp
     /// </summary>
     internal static class Updater
     {
-        public const string CurrentVersion = "v2.2.2";
+        public const string CurrentVersion = "v2.2.3";
         private const string Repo = "ce2004/arp-native";
 
         /// <summary>Suffix given to the outgoing executable while it is still running.</summary>

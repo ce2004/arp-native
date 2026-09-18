@@ -57,8 +57,12 @@ namespace Arp
             public IntPtr hBalloonIcon;
         }
 
-        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-        private static extern bool Shell_NotifyIconW(int message, ref NOTIFYICONDATAW data);
+        // Passed by pointer so the struct goes across exactly as laid out. By
+        // ref, the marshaller copied its char buffers as one-byte ANSI, and the
+        // shell read each string as its first letter: a toast titled "R" with
+        // the body "A".
+        [DllImport("shell32.dll")]
+        private static extern bool Shell_NotifyIconW(int message, NOTIFYICONDATAW* data);
 
         private static IntPtr _owner;
         private static int _nextId = 1;
@@ -97,7 +101,7 @@ namespace Arp
             };
             Copy(data.szTip, 128, Fit(appName, 127, appName));
 
-            if (!Shell_NotifyIconW(NIM_ADD, ref data))
+            if (!Shell_NotifyIconW(NIM_ADD, &data))
             {
                 Log.Warn("Shell_NotifyIcon(NIM_ADD) failed for notification: " + title);
                 return;
@@ -113,7 +117,7 @@ namespace Arp
                 _ => NIIF_INFO,
             };
 
-            if (!Shell_NotifyIconW(NIM_MODIFY, ref data))
+            if (!Shell_NotifyIconW(NIM_MODIFY, &data))
                 Log.Warn("Shell_NotifyIcon(NIM_MODIFY) failed for notification: " + title);
 
             // Windows keeps the toast alive once shown; the icon only needs to
@@ -128,7 +132,7 @@ namespace Arp
                     hWnd = owner,
                     uID = id,
                 };
-                try { Shell_NotifyIconW(NIM_DELETE, ref del); } catch { }
+                try { Shell_NotifyIconW(NIM_DELETE, &del); } catch { }
             })
             { IsBackground = true, Name = "NotifyReaper" };
             t.Start();

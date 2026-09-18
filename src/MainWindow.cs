@@ -245,8 +245,12 @@ namespace Arp
             switch (id)
             {
                 case IdExit:
-                case Win32.IDCANCEL:
                     HandleClose();
+                    return true;
+                case Win32.IDCANCEL:
+                    // Escape. It dismisses a dialog, but here it would close the
+                    // whole program. Alt+F4 and the close button arrive as
+                    // WM_CLOSE and still exit.
                     return true;
                 case IdSettings: OpenSettings(); return true;
                 case IdRecord: ToggleRecording(); return true;
