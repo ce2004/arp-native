@@ -289,6 +289,26 @@ namespace Arp
             Win32.ShowWindow(h, visible ? Win32.SW_SHOW : 0);
         }
 
+        /// <summary>
+        /// Disables a button without losing keyboard focus. Disabling the
+        /// focused control leaves focus nowhere: the window stays in front but
+        /// ignores the keyboard until Alt+Tab reactivates it. Focus is parked on
+        /// the window itself first, and <see cref="RestoreFocus"/> hands it back.
+        /// </summary>
+        private void Disable(int id)
+        {
+            IntPtr h = Win32.GetDlgItem(Hwnd, id);
+            if (h != IntPtr.Zero && Win32.GetFocus() == h) Win32.SetFocus(Hwnd);
+            Win32.EnableWindow(h, false);
+        }
+
+        /// <summary>Moves focus from wherever <see cref="Disable"/> parked it to a control.</summary>
+        private void RestoreFocus(int id)
+        {
+            IntPtr f = Win32.GetFocus();
+            if ((f == Hwnd || f == IntPtr.Zero) && IsForeground()) Focus(id);
+        }
+
         private readonly Dictionary<int, string> _listShown = new();
         private readonly Dictionary<int, string> _listPending = new();
 
@@ -519,7 +539,8 @@ namespace Arp
                 Text(IdRecord, "S&top Recording");
                 Enable(IdPause, true);
                 Text(IdPause, "&Pause");
-                Enable(IdSettings, false);
+                Disable(IdSettings);
+                RestoreFocus(IdRecord);
 
                 _rec.Start(mic1, mic2, sr, ch, bd, bufSize, prefix);
                 _driveMonitor.Start();
@@ -615,9 +636,9 @@ namespace Arp
             Win32.KillTimer(Hwnd, (UIntPtr)TimerLiveStats);
             Win32.KillTimer(Hwnd, (UIntPtr)TimerDisk);
 
-            Enable(IdRecord, false);
-            Enable(IdPause, false);
-            Enable(IdSettings, false);
+            Disable(IdRecord);
+            Disable(IdPause);
+            Disable(IdSettings);
 
             _statusMsg = "Status: Stopping and finalizing recording...";
             UpdateDashboard();
@@ -660,6 +681,7 @@ namespace Arp
             Text(IdPause, "&Pause");
             Enable(IdSettings, true);
             ShowStats(false);
+            RestoreFocus(IdRecord);
 
             _statusMsg = "Status: Ready";
             UpdateDashboard();
