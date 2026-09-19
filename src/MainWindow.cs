@@ -38,6 +38,10 @@ namespace Arp
         private bool _isPaused;
         private bool _shuttingDown;
         private bool _pendingClose;
+        private bool _inSettings;
+        private bool _autoStartPending;
+        private bool _resumePending;
+        private UpdateInfo _pendingUpdate;
         private bool _handlingDisconnect;
         private bool _notifyOnStop = true;
         private bool _statsVisible;
@@ -100,7 +104,10 @@ namespace Arp
                     "Device Not Found");
             }
 
-            CheckRecoveryJournal();
+            // Found before auto-start can begin a new session, but offered after
+            // its timer is armed: the prompt is modal, and an unattended restart
+            // after a power cut must not sit waiting for someone to answer it.
+            var unfinished = FindUnfinishedRecordings();
 
             // Off the UI thread. This is a network round trip, and running it
             // inside WM_INITDIALOG meant the window could not appear until
@@ -113,7 +120,7 @@ namespace Arp
                     try
                     {
                         var info = Updater.CheckQuietly();
-                        if (info != null) Post(() => Updater.Offer(Hwnd, info));
+                        if (info != null) Post(() => OfferUpdate(info));
                     }
                     catch (Exception e)
                     {
@@ -138,6 +145,41 @@ namespace Arp
                     Win32.SetTimer(Hwnd, (UIntPtr)TimerAutoStart, 100, IntPtr.Zero);
                 }
             }
+
+            PromptRepairs(unfinished);
+        }
+
+        /// <summary>
+        /// Installing an update exits the process, which would cut off a
+        /// recording before its file is finalized, and an offer made while
+        /// Settings is open would skip saving it. Held until neither applies.
+        /// </summary>
+        private void OfferUpdate(UpdateInfo info)
+        {
+            if (_isRecording || _shuttingDown || _inSettings)
+            {
+                _pendingUpdate = info;
+                return;
+            }
+            _pendingUpdate = null;
+            Updater.Offer(Hwnd, info);
+        }
+
+        /// <summary>Runs whatever was held back while recording or in Settings.</summary>
+        private void RunDeferred()
+        {
+            if (_isRecording || _shuttingDown || _inSettings) return;
+
+            if (_resumePending || _autoStartPending)
+            {
+                bool resume = _resumePending;
+                _resumePending = _autoStartPending = false;
+                if (resume) PopulateDevices();
+                StartRecording();
+                return;
+            }
+
+            if (_pendingUpdate != null) OfferUpdate(_pendingUpdate);
         }
 
         private bool IsForeground()
@@ -191,8 +233,19 @@ namespace Arp
 
                 case Win32.WM_QUERYENDSESSION:
                     HandleEndSession();
+                    // A dialog procedure's return value only says the message
+                    // was handled; the answer itself goes in DWLP_MSGRESULT.
+                    // Left at zero, it told Windows not to shut down.
+                    Win32.SetWindowLongPtr(Hwnd, Win32.DWLP_MSGRESULT, (IntPtr)1);
                     result = (IntPtr)1;
                     return true;
+
+                case Win32.WM_ACTIVATE:
+                    // Coming back to the window, Windows returns focus to the
+                    // control that last had it, which may since have been
+                    // disabled. That leaves the window taking no keys.
+                    if (((long)wParam & 0xFFFF) != 0) Post(EnsureFocus);
+                    return false;
 
                 // Windows tells every top-level window when a volume appears or
                 // disappears. Acting on that is instant and free, which is why
@@ -227,7 +280,10 @@ namespace Arp
                 case TimerShutdown: PollSessionShutdown(); break;
                 case TimerAutoStart:
                     Win32.KillTimer(Hwnd, (UIntPtr)TimerAutoStart);
-                    StartRecording();
+                    // Timers still fire under the Settings dialog; recording
+                    // must not start behind it with settings half changed.
+                    if (_inSettings) _autoStartPending = true;
+                    else StartRecording();
                     break;
             }
         }
@@ -267,7 +323,7 @@ namespace Arp
             var mic = _devices.Find(d => d.Id == devId);
             string micName = mic != null ? mic.Name
                 : string.IsNullOrEmpty(devId) || devId == "none" ? "Not set" : "Disconnected";
-            string folder = string.IsNullOrEmpty(_cfg.SaveFolder) ? "Not set" : _cfg.SaveFolder;
+            string folder = _cfg.SaveFolder;
 
             int split = _cfg.AutoSplitSecs;
             string overview =
@@ -313,6 +369,16 @@ namespace Arp
         {
             IntPtr f = Win32.GetFocus();
             if ((f == Hwnd || f == IntPtr.Zero) && IsForeground()) Focus(id);
+        }
+
+        /// <summary>Gives focus to the record button, or Exit if that is disabled, when nothing usable has it.</summary>
+        private void EnsureFocus()
+        {
+            if (!IsForeground()) return;
+            IntPtr f = Win32.GetFocus();
+            if (f != IntPtr.Zero && f != Hwnd && Win32.IsWindowEnabled(f) && Win32.IsWindowVisible(f)) return;
+            IntPtr rec = Win32.GetDlgItem(Hwnd, IdRecord);
+            Focus(Win32.IsWindowEnabled(rec) ? IdRecord : IdExit);
         }
 
         private readonly Dictionary<int, string> _listShown = new();
@@ -429,7 +495,9 @@ namespace Arp
         {
             PopulateDevices();
             var dlg = new SettingsDialog(_cfg, _devices);
-            dlg.ShowModal(Hwnd);
+            _inSettings = true;
+            try { dlg.ShowModal(Hwnd); }
+            finally { _inSettings = false; }
 
             // Refreshed however the dialog closed: Check for Updates Now saves
             // the settings too, and the dialog can then be closed with Escape.
@@ -445,6 +513,8 @@ namespace Arp
                 _autoResume.Stop();
                 StartAutoResume(missing);
             }
+
+            RunDeferred();
         }
 
         // ---- recording ----
@@ -625,6 +695,7 @@ namespace Arp
 
         private void OnSplitCompleted()
         {
+            if (!_isRecording) return;
             _splitCount++;
             string msg = "Split " + _splitCount + " started";
             Notify("File Split", msg, "notify_split");
@@ -747,7 +818,10 @@ namespace Arp
             {
                 _pendingClose = false;
                 DestroyAndQuit();
+                return;
             }
+
+            RunDeferred();
         }
 
         // ---- failure handling ----
@@ -837,6 +911,8 @@ namespace Arp
 
         private void HandleMicDisconnect(int micNum, bool willContinue)
         {
+            // A reader ending because Stop was pressed is not an unplugged mic.
+            if (!_isRecording) return;
             string msg = "CRITICAL ERROR: Microphone " + micNum + " was unplugged or disabled during recording!";
 
             if (willContinue)
@@ -885,6 +961,11 @@ namespace Arp
         {
             _autoResume?.Stop();
 
+            // Still finalizing the session that just failed, or Settings is
+            // open: StartRecording would refuse or start behind the dialog,
+            // and the watcher has already stopped, so nothing would retry.
+            bool defer = _shuttingDown || _inSettings;
+
             Speak(missing switch
             {
                 "drive" => "Output drive found. Recording again after error.",
@@ -894,6 +975,11 @@ namespace Arp
 
             // The device list has to be rebuilt: the reconnected endpoint is a
             // fresh object that the cached list does not contain.
+            if (defer)
+            {
+                _resumePending = true;
+                return;
+            }
             PopulateDevices();
             StartRecording();
         }
@@ -963,8 +1049,9 @@ namespace Arp
 
         // ---- crash recovery ----
 
-        private void CheckRecoveryJournal()
+        private List<(string Journal, string File)> FindUnfinishedRecordings()
         {
+            var found = new List<(string, string)>();
             var paths = new List<string> { Path.Combine(Config.AppDataDir, "active_recording.json") };
 
             string saveFolder = _cfg.SaveFolder;
@@ -1011,6 +1098,22 @@ namespace Arp
                         continue;
                     }
 
+                    found.Add((journalPath, filepath));
+                }
+                catch (Exception e)
+                {
+                    Log.Error("Failed to process recovery journal: " + e.Message);
+                }
+            }
+            return found;
+        }
+
+        private void PromptRepairs(List<(string Journal, string File)> unfinished)
+        {
+            foreach (var (journalPath, filepath) in unfinished)
+            {
+                try
+                {
                     long res = (long)new RepairDialog(filepath).ShowModal(Hwnd);
                     if (res == 1)
                     {
@@ -1079,7 +1182,13 @@ namespace Arp
 
         private void HandleClose()
         {
-            if (_pendingClose) { DestroyAndQuit(); return; }
+            if (_pendingClose)
+            {
+                // Quitting now would cut off the file being finalized.
+                if (_shuttingDown) { Speak("Still finalizing the recording. Please wait."); return; }
+                DestroyAndQuit();
+                return;
+            }
 
             if (_isRecording && _cfg.ConfirmExit)
             {

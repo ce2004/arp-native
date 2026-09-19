@@ -145,6 +145,8 @@ namespace Arp
             Eq(cfg.WindowTitle, "ARP", "window_title read");
             Eq(cfg.SampleRate, "48000", "missing key falls back to default");
             Eq(cfg.In1Gain, 1.0, "in1_gain defaults to 1.0 with no second input");
+            Eq(cfg.SaveFolder, Config.AppFolder, "an unchosen save folder is the program's own folder");
+            Eq(cfg.DeviceId, "", "no recording device is chosen by default");
 
             cfg.Device2Id = "{0.0.1.0}.{abc}";
             Eq(cfg.In1Gain, 0.5, "in1_gain drops to 0.5 once a second input is set");

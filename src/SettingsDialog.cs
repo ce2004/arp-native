@@ -158,13 +158,16 @@ namespace Arp
 
             PopulateDevices();
 
-            foreach (string r in new[] { "44100", "48000", "88200", "96000", "192000", "384000" })
+            // A value from the config that is not in the list is added rather
+            // than silently replaced by the first entry on the next Save.
+            foreach (string r in WithCurrent(new[] { "44100", "48000", "88200", "96000", "192000", "384000" }, _cfg.SampleRate))
                 Win32.ComboAdd(Hwnd, IdSampleRate, r, 0);
             foreach (string r in new[] { "16", "24", "32" })
                 Win32.ComboAdd(Hwnd, IdBitDepth, r, 0);
             foreach (string r in new[] { "1 (Mono)", "2 (Stereo)" })
                 Win32.ComboAdd(Hwnd, IdChannels, r, 0);
-            foreach (string r in new[] { "512", "1024", "2048", "4096", "8192" })
+            foreach (string r in WithCurrent(new[] { "512", "1024", "2048", "4096", "8192" },
+                         _cfg.BufferSize.ToString(CultureInfo.InvariantCulture)))
                 Win32.ComboAdd(Hwnd, IdBuffer, r, 0);
 
             Win32.ComboSelectByText(Hwnd, IdSampleRate, _cfg.SampleRate);
@@ -188,6 +191,12 @@ namespace Arp
             _delay.TotalSeconds = _cfg.AutoStartDelay;
             _maxLen.TotalSeconds = _cfg.MaxLengthSecs;
             _split.TotalSeconds = _cfg.AutoSplitSecs;
+        }
+
+        private static IEnumerable<string> WithCurrent(string[] choices, string current)
+        {
+            foreach (string c in choices) yield return c;
+            if (!string.IsNullOrEmpty(current) && Array.IndexOf(choices, current) < 0) yield return current;
         }
 
         private void PopulateDevices()
@@ -389,9 +398,15 @@ namespace Arp
             if (int.TryParse(bufText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int buf) && buf > 0)
                 _cfg.BufferSize = buf;
 
-            _cfg.WindowTitle = Text(IdTitle);
+            // A blank title leaves the screen reader announcing an unnamed window.
+            string title = Text(IdTitle).Trim();
+            if (title.Length > 0) _cfg.WindowTitle = title;
             _cfg.CheckUpdatesStartup = Checked(IdUpdateStartup);
-            _cfg.SaveFolder = Text(IdFolder);
+            // Written only when changed, so a folder never chosen stays the
+            // program's own folder and moves with it.
+            string folder = Text(IdFolder);
+            if (!string.Equals(folder, _cfg.SaveFolder, StringComparison.OrdinalIgnoreCase))
+                _cfg.SaveFolder = folder;
             _cfg.DeviceSortOrder = Win32.ComboGetText(Hwnd, IdSort);
 
             _cfg.Save();

@@ -84,7 +84,24 @@ namespace Arp
 
         public bool AutoStart { get => B("auto_start", false); set => Set("auto_start", value); }
         public int AutoStartDelay { get => I("auto_start_delay", 0); set => Set("auto_start_delay", value); }
-        public string SaveFolder { get => S("save_folder", ""); set => Set("save_folder", value); }
+        /// <summary>
+        /// Where recordings go. Until one is chosen in Settings it is the folder
+        /// the program itself is in, and follows the program if it is moved.
+        /// </summary>
+        public string SaveFolder
+        {
+            get
+            {
+                string v = S("save_folder", "");
+                return string.IsNullOrEmpty(v) ? AppFolder : v;
+            }
+            set => Set("save_folder", value);
+        }
+
+        public static string AppFolder =>
+            Path.GetDirectoryName(Environment.ProcessPath) ??
+            AppContext.BaseDirectory.TrimEnd('\\', '/');
+
         public string SampleRate { get => S("sample_rate", "48000"); set => Set("sample_rate", value); }
         public string BitDepth { get => S("bit_depth", "24"); set => Set("bit_depth", value); }
         public string Channels { get => S("channels", "2"); set => Set("channels", value); }

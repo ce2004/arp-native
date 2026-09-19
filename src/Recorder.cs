@@ -349,6 +349,10 @@ namespace Arp
                     {
                         Thread.Sleep(10);
 
+                        // Readers also end when Stop is pressed, and one can
+                        // finish inside that sleep. That is not an unplugged mic.
+                        if (session.StopEvent.IsSet) break;
+
                         if (!_r1.IsAlive && !mic1Failed)
                         {
                             Log.Warn("Mic 1 thread died unexpectedly");
